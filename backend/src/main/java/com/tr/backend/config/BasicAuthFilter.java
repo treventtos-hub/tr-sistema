@@ -31,7 +31,9 @@ public class BasicAuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         aplicarCors(request, response);
 
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || "/health".equals(request.getRequestURI())) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())
+                || "/health".equals(request.getRequestURI())
+                || "/auth/login".equals(request.getRequestURI())) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -73,12 +75,25 @@ public class BasicAuthFilter extends OncePerRequestFilter {
                 return false;
             }
 
-            String providedUsername = decoded.substring(0, separator).trim();
-            String providedPassword = decoded.substring(separator + 1).trim();
+            String providedUsername = limpar(decoded.substring(0, separator));
+            String providedPassword = limpar(decoded.substring(separator + 1));
 
-            return username.trim().equalsIgnoreCase(providedUsername) && password.trim().equals(providedPassword);
+            return limpar(username).equalsIgnoreCase(providedUsername) && limpar(password).equals(providedPassword);
         } catch (IllegalArgumentException error) {
             return false;
         }
+    }
+
+    private String limpar(String valor) {
+        if (valor == null) {
+            return "";
+        }
+
+        return valor
+                .replace("\u200B", "")
+                .replace("\u200C", "")
+                .replace("\u200D", "")
+                .replace("\uFEFF", "")
+                .trim();
     }
 }

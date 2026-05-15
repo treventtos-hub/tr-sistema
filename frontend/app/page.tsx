@@ -374,7 +374,11 @@ export default function Home() {
     };
 
     try {
-      const response = await apiFetch(`${apiUrl}/`, { cache: "no-store" }, credencialAtual);
+      const response = await fetch(`${apiUrl}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(credencialAtual)
+      });
 
       if (!response.ok) {
         setLoginErro("Login ou senha incorretos.");

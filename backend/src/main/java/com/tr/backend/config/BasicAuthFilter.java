@@ -73,10 +73,10 @@ public class BasicAuthFilter extends OncePerRequestFilter {
                 return false;
             }
 
-            String providedUsername = decoded.substring(0, separator);
-            String providedPassword = decoded.substring(separator + 1);
+            String providedUsername = decoded.substring(0, separator).trim();
+            String providedPassword = decoded.substring(separator + 1).trim();
 
-            return username.equals(providedUsername) && password.equals(providedPassword);
+            return username.trim().equalsIgnoreCase(providedUsername) && password.trim().equals(providedPassword);
         } catch (IllegalArgumentException error) {
             return false;
         }

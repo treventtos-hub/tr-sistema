@@ -370,7 +370,7 @@ export default function Home() {
 
     const credencialAtual = {
       email: loginForm.email.trim(),
-      senha: loginForm.senha
+      senha: loginForm.senha.trim()
     };
 
     try {

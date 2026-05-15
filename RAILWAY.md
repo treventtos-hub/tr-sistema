@@ -6,7 +6,8 @@ Este repositorio esta preparado para subir o backend no Railway usando o `Docker
 
 1. Crie um projeto no Railway a partir do GitHub.
 2. Adicione um banco PostgreSQL no mesmo projeto.
-3. No servico do backend, confirme que o Railway esta usando o `Dockerfile` da raiz.
+3. No servico do backend, deixe o `Root Directory` vazio para usar o `Dockerfile` da raiz.
+4. Se voce configurou o `Root Directory` como `backend`, tambem funciona: nesse caso o Railway usa `backend/Dockerfile`.
 
 ## Variaveis obrigatorias no backend
 
@@ -19,6 +20,8 @@ APP_AUTH_PASSWORD=sua-senha-do-sistema
 
 O PostgreSQL do Railway fornece `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` e `PGDATABASE`.
 O backend usa essas variaveis automaticamente.
+
+Se essas variaveis nao aparecerem no servico do backend, conecte o PostgreSQL ao backend pelo painel do Railway ou copie as variaveis do servico PostgreSQL para o backend.
 
 ## Healthcheck
 
@@ -43,6 +46,13 @@ https://SEU-BACKEND.up.railway.app/health
 ```
 
 Para acessar as demais rotas, use o login e senha configurados.
+
+Se `/health` nao abrir, veja os logs do servico no Railway. Os erros mais comuns sao:
+
+- faltou adicionar PostgreSQL no projeto;
+- faltou `APP_AUTH_USERNAME` ou `APP_AUTH_PASSWORD`;
+- o backend foi criado com `Root Directory` errado;
+- o servico nao esta usando o `Dockerfile`.
 
 ## Frontend
 

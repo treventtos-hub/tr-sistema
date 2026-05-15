@@ -70,7 +70,7 @@ type ObservacaoAluno = {
   dataCriacao?: string;
 };
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081").replace(/\/+$/, "");
 type SalvamentoStatus = "idle" | "saving" | "saved" | "error";
 type BackupStatus = "idle" | "running" | "done" | "error";
 type Credenciais = {

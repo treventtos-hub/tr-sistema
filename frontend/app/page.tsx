@@ -99,6 +99,7 @@ export default function Home() {
   const [credenciais, setCredenciais] = useState<Credenciais | null>(() => carregarLoginSalvo());
   const [loginForm, setLoginForm] = useState(() => carregarLoginSalvo() || { email: "", senha: "" });
   const [loginErro, setLoginErro] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [view, setView] = useState<ViewMode>("menu");
   const [sistemaAtivo, setSistemaAtivo] = useState(false);
   const [salvamentoStatus, setSalvamentoStatus] = useState<SalvamentoStatus>("idle");
@@ -2097,15 +2098,24 @@ export default function Home() {
               autoComplete="username"
               required
             />
-            <input
-              type="password"
-              placeholder="Senha"
-              value={loginForm.senha}
-              onChange={(event) => setLoginForm({ ...loginForm, senha: event.target.value })}
-              className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              autoComplete="current-password"
-              required
-            />
+            <div className="flex rounded-3xl border border-slate-200 bg-slate-50 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200">
+              <input
+                type={mostrarSenha ? "text" : "password"}
+                placeholder="Senha"
+                value={loginForm.senha}
+                onChange={(event) => setLoginForm({ ...loginForm, senha: event.target.value })}
+                className="min-w-0 flex-1 rounded-l-3xl bg-transparent px-4 py-3 text-slate-900 outline-none"
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setMostrarSenha((valor) => !valor)}
+                className="rounded-r-3xl px-4 py-3 text-sm font-semibold text-sky-700 transition hover:bg-sky-50"
+              >
+                {mostrarSenha ? "Ocultar" : "Mostrar"}
+              </button>
+            </div>
             {loginErro && (
               <div className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
                 {loginErro}

@@ -1,13 +1,13 @@
 # Backend no Railway
 
-Este repositorio esta preparado para subir o backend no Railway usando o `Dockerfile` da raiz.
+Este repositorio esta preparado para subir o backend no Railway usando a pasta `backend`.
 
 ## Servicos no Railway
 
 1. Crie um projeto no Railway a partir do GitHub.
 2. Adicione um banco PostgreSQL no mesmo projeto.
-3. No servico do backend, deixe o `Root Directory` vazio para usar o `Dockerfile` da raiz.
-4. Se voce configurou o `Root Directory` como `backend`, tambem funciona: nesse caso o Railway usa `backend/Dockerfile`.
+3. No servico do backend, configure o `Root Directory` como `backend`.
+4. O Railway deve usar `backend/Dockerfile` e `backend/railway.json`.
 
 ## Variaveis obrigatorias no backend
 

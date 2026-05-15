@@ -1,0 +1,15 @@
+{
+	email {$ACME_EMAIL}
+}
+
+sistema.{$APP_DOMAIN} {
+	reverse_proxy frontend:3000
+}
+
+www.{$APP_DOMAIN}, {$APP_DOMAIN} {
+	redir https://sistema.{$APP_DOMAIN}{uri} permanent
+}
+
+api.{$APP_DOMAIN} {
+	reverse_proxy backend:8081
+}

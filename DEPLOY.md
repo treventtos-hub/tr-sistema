@@ -12,10 +12,10 @@ Este projeto esta preparado para rodar em uma VPS com Docker Compose, usando:
 No painel do dominio, crie registros `A` apontando para o IP publico da VPS:
 
 ```txt
-sistema.treventtos.com.br -> IP_DA_VPS
-api.treventtos.com.br     -> IP_DA_VPS
-www.treventtos.com.br     -> IP_DA_VPS
-treventtos.com.br         -> IP_DA_VPS
+sistema.treventtos.com.br -> 54.232.119.62
+api.treventtos.com.br     -> 54.232.119.62
+www.treventtos.com.br     -> 54.232.119.62
+treventtos.com.br         -> 54.232.119.62
 ```
 
 ## Arquivo de ambiente

@@ -16,4 +16,9 @@ public class HomeController {
                 "rotas", List.of("/alunos", "/escolas", "/pagamentos", "/comissao-formatura")
         );
     }
+
+    @GetMapping("/health")
+    public Map<String, String> health() {
+        return Map.of("status", "ok");
+    }
 }

@@ -31,7 +31,7 @@ public class BasicAuthFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         aplicarCors(request, response);
 
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod()) || "/health".equals(request.getRequestURI())) {
             filterChain.doFilter(request, response);
             return;
         }

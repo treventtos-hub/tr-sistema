@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas";
 type ServicoFiltro = "todos" | "baile" | "kit" | "homenagem" | "replica";
@@ -73,8 +73,32 @@ type ObservacaoAluno = {
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 type SalvamentoStatus = "idle" | "saving" | "saved" | "error";
 type BackupStatus = "idle" | "running" | "done" | "error";
+type Credenciais = {
+  email: string;
+  senha: string;
+};
+
+const loginStorageKey = "tr-sistema-login";
+
+function carregarLoginSalvo() {
+  if (typeof window === "undefined") return null;
+
+  const salvo = window.localStorage.getItem(loginStorageKey);
+  if (!salvo) return null;
+
+  try {
+    const loginSalvo = JSON.parse(salvo) as Credenciais;
+    return loginSalvo.email && loginSalvo.senha ? loginSalvo : null;
+  } catch {
+    window.localStorage.removeItem(loginStorageKey);
+    return null;
+  }
+}
 
 export default function Home() {
+  const [credenciais, setCredenciais] = useState<Credenciais | null>(() => carregarLoginSalvo());
+  const [loginForm, setLoginForm] = useState(() => carregarLoginSalvo() || { email: "", senha: "" });
+  const [loginErro, setLoginErro] = useState("");
   const [view, setView] = useState<ViewMode>("menu");
   const [sistemaAtivo, setSistemaAtivo] = useState(false);
   const [salvamentoStatus, setSalvamentoStatus] = useState<SalvamentoStatus>("idle");
@@ -138,13 +162,63 @@ export default function Home() {
   const [servicoEscolaFiltro, setServicoEscolaFiltro] = useState<ServicoFiltro>("todos");
 
   useEffect(() => {
-    listarTodos();
-    listarEscolas();
-    verificarSistema();
+    if (!credenciais) return;
 
-    const intervalo = window.setInterval(verificarSistema, 15000);
+    const headers = {
+      Authorization: `Basic ${window.btoa(`${credenciais.email}:${credenciais.senha}`)}`
+    };
+
+    function encerrarSessao() {
+      setCredenciais(null);
+      setSistemaAtivo(false);
+      window.localStorage.removeItem(loginStorageKey);
+    }
+
+    async function carregarDadosIniciais() {
+      try {
+        const [alunosResponse, escolasResponse, sistemaResponse] = await Promise.all([
+          fetch(`${apiUrl}/alunos`, { headers }),
+          fetch(`${apiUrl}/escolas`, { headers }),
+          fetch(`${apiUrl}/`, { cache: "no-store", headers })
+        ]);
+
+        if (alunosResponse.status === 401 || escolasResponse.status === 401 || sistemaResponse.status === 401) {
+          encerrarSessao();
+          return;
+        }
+
+        setSistemaAtivo(sistemaResponse.ok);
+
+        if (alunosResponse.ok) {
+          setAlunos(await alunosResponse.json());
+        }
+
+        if (escolasResponse.ok) {
+          setEscolas(await escolasResponse.json());
+        }
+      } catch {
+        setSistemaAtivo(false);
+      }
+    }
+
+    async function checarSistema() {
+      try {
+        const response = await fetch(`${apiUrl}/`, { cache: "no-store", headers });
+        if (response.status === 401) {
+          encerrarSessao();
+          return;
+        }
+        setSistemaAtivo(response.ok);
+      } catch {
+        setSistemaAtivo(false);
+      }
+    }
+
+    void carregarDadosIniciais();
+
+    const intervalo = window.setInterval(checarSistema, 15000);
     return () => window.clearInterval(intervalo);
-  }, []);
+  }, [credenciais]);
 
   const indicadores = useMemo(() => {
     return {
@@ -266,20 +340,64 @@ export default function Home() {
     return valor ? parseFloat(valor) : 0;
   }
 
-  async function verificarSistema() {
-    try {
-      const response = await fetch(`${apiUrl}/`, { cache: "no-store" });
-      setSistemaAtivo(response.ok);
-    } catch {
-      setSistemaAtivo(false);
+  function authHeaders(credencialAtual = credenciais) {
+    if (!credencialAtual) return {};
+
+    return {
+      Authorization: `Basic ${window.btoa(`${credencialAtual.email}:${credencialAtual.senha}`)}`
+    };
+  }
+
+  async function apiFetch(url: string, init: RequestInit = {}, credencialAtual = credenciais) {
+    const headers = new Headers(init.headers);
+    const auth = authHeaders(credencialAtual);
+
+    Object.entries(auth).forEach(([key, value]) => headers.set(key, value));
+
+    const response = await fetch(url, { ...init, headers });
+
+    if (response.status === 401) {
+      sair();
     }
+
+    return response;
+  }
+
+  async function entrar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginErro("");
+
+    const credencialAtual = {
+      email: loginForm.email.trim(),
+      senha: loginForm.senha
+    };
+
+    try {
+      const response = await apiFetch(`${apiUrl}/`, { cache: "no-store" }, credencialAtual);
+
+      if (!response.ok) {
+        setLoginErro("Login ou senha incorretos.");
+        return;
+      }
+
+      setCredenciais(credencialAtual);
+      window.localStorage.setItem(loginStorageKey, JSON.stringify(credencialAtual));
+    } catch {
+      setLoginErro("Nao foi possivel conectar com a API.");
+    }
+  }
+
+  function sair() {
+    setCredenciais(null);
+    setSistemaAtivo(false);
+    window.localStorage.removeItem(loginStorageKey);
   }
 
   async function enviarAlteracao(url: string, init: RequestInit) {
     setSalvamentoStatus("saving");
 
     try {
-      const response = await fetch(url, init);
+      const response = await apiFetch(url, init);
       setSalvamentoStatus(response.ok ? "saved" : "error");
       window.setTimeout(() => setSalvamentoStatus("idle"), 3000);
       return response;
@@ -294,7 +412,7 @@ export default function Home() {
     setBackupStatus("running");
 
     try {
-      const response = await fetch(`${apiUrl}/backup`, { method: "POST" });
+      const response = await apiFetch(`${apiUrl}/backup`, { method: "POST" });
       setBackupStatus(response.ok ? "done" : "error");
     } catch {
       setBackupStatus("error");
@@ -459,13 +577,13 @@ export default function Home() {
       alert("Preencha nome do aluno, responsavel ou escola para pesquisar.");
       return;
     }
-    const response = await fetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
+    const response = await apiFetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
     setAlunos(await response.json());
     setResultadoBuscaVisivel(true);
   }
 
   async function listarTodos() {
-    const response = await fetch(`${apiUrl}/alunos`);
+    const response = await apiFetch(`${apiUrl}/alunos`);
     setAlunos(await response.json());
   }
 
@@ -482,7 +600,7 @@ export default function Home() {
   }
 
   async function listarEscolas() {
-    const response = await fetch(`${apiUrl}/escolas`);
+    const response = await apiFetch(`${apiUrl}/escolas`);
     setEscolas(await response.json());
   }
 
@@ -497,7 +615,7 @@ export default function Home() {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
+    const response = await apiFetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
     if (!response.ok) {
       alert("Nao foi possivel consultar a comissao desta escola.");
       return;
@@ -514,7 +632,7 @@ export default function Home() {
 
     carregarObservacoesAluno(aluno.id);
 
-    const response = await fetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
+    const response = await apiFetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
     if (response.ok) {
       const comissoes = await response.json();
       setComissaoAlunoDetalhe(comissoes[0] || null);
@@ -522,7 +640,7 @@ export default function Home() {
   }
 
   async function carregarObservacoesAluno(alunoId: number) {
-    const response = await fetch(`${apiUrl}/alunos/${alunoId}/observacoes`);
+    const response = await apiFetch(`${apiUrl}/alunos/${alunoId}/observacoes`);
     if (!response.ok) {
       alert("Nao foi possivel carregar as observacoes deste aluno.");
       return;
@@ -585,7 +703,7 @@ export default function Home() {
     setNumeroParcela("");
     setUltimoPagamento(null);
 
-    const response = await fetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
     if (!response.ok) {
       alert("Nao foi possivel carregar o financeiro deste aluno.");
       return;
@@ -723,12 +841,12 @@ export default function Home() {
   }
 
   async function carregarPagamentos(alunoId: number) {
-    const response = await fetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
+    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
     setPagamentos(await response.json());
   }
 
   async function abrirUltimoReciboAluno(aluno: Aluno) {
-    const response = await fetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
     if (!response.ok) {
       alert("Nao foi possivel carregar os pagamentos deste aluno.");
       return;
@@ -774,7 +892,7 @@ export default function Home() {
 
     if (alunoSelecionado?.id === parseInt(pagamento.alunoId)) {
       carregarPagamentos(alunoSelecionado.id);
-      const alunoResponse = await fetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
+      const alunoResponse = await apiFetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
       const updatedAlunos = await alunoResponse.json();
       const atualizado = updatedAlunos.find((aluno: Aluno) => aluno.id === alunoSelecionado.id) || updatedAlunos[0];
       if (atualizado) setAlunoSelecionado(atualizado);
@@ -783,7 +901,7 @@ export default function Home() {
 
     if (alunoFinanceiro?.id === parseInt(pagamento.alunoId)) {
       if (pagamentoSalvo.aluno) setAlunoFinanceiro(pagamentoSalvo.aluno);
-      const pagamentosResponse = await fetch(`${apiUrl}/pagamentos/aluno/${pagamento.alunoId}`);
+      const pagamentosResponse = await apiFetch(`${apiUrl}/pagamentos/aluno/${pagamento.alunoId}`);
       const pagamentosAluno: Pagamento[] = await pagamentosResponse.json();
       setPagamentosFinanceiro(
         pagamentosAluno.sort((a, b) => Number(a.numeroParcela || a.id || 0) - Number(b.numeroParcela || b.id || 0))
@@ -1960,6 +2078,52 @@ export default function Home() {
     );
   }
 
+  function telaLogin() {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 text-slate-950">
+        <section className="w-full max-w-md rounded-[2rem] border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/70 sm:p-8">
+          <div className="space-y-3">
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-600">Painel TR</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Entrar no sistema</h1>
+          </div>
+
+          <form onSubmit={entrar} className="mt-8 space-y-4">
+            <input
+              type="email"
+              placeholder="Login"
+              value={loginForm.email}
+              onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })}
+              className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+              autoComplete="username"
+              required
+            />
+            <input
+              type="password"
+              placeholder="Senha"
+              value={loginForm.senha}
+              onChange={(event) => setLoginForm({ ...loginForm, senha: event.target.value })}
+              className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+              autoComplete="current-password"
+              required
+            />
+            {loginErro && (
+              <div className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                {loginErro}
+              </div>
+            )}
+            <button type="submit" className="w-full rounded-3xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
+              Entrar
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  if (!credenciais) {
+    return telaLogin();
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 sm:px-6 lg:px-10">
       <div className="fixed left-4 top-4 z-50 rounded-3xl border border-slate-200 bg-white/95 px-4 py-3 text-sm shadow-lg shadow-slate-200/70 backdrop-blur">
@@ -1975,6 +2139,13 @@ export default function Home() {
         </div>
       </div>
       <div className="fixed right-4 top-4 z-50 flex flex-col items-end gap-2">
+        <button
+          type="button"
+          onClick={sair}
+          className="rounded-3xl border border-slate-200 bg-white/95 px-5 py-3 text-sm font-semibold text-slate-700 shadow-lg shadow-slate-200/70 backdrop-blur transition hover:bg-slate-50"
+        >
+          Sair
+        </button>
         <button
           type="button"
           onClick={fazerBackupManual}

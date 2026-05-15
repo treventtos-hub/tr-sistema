@@ -27,6 +27,13 @@ cp .env.prod.example .env
 nano .env
 ```
 
+No `.env`, configure tambem o login do sistema:
+
+```txt
+APP_AUTH_USERNAME=treventtos@gmail.com
+APP_AUTH_PASSWORD=sua-senha-do-sistema
+```
+
 ## Subir
 
 ```bash

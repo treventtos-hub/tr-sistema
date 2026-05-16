@@ -25,6 +25,8 @@ public class Aluno {
 
     private String categoria;
 
+    private String formaPagamento;
+
     private Boolean baile;
 
     private Boolean kitFormatura;

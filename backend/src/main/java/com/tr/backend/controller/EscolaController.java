@@ -7,6 +7,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.List;
 
 @RestController
@@ -24,7 +28,36 @@ public class EscolaController {
 
     @GetMapping
     public List<Escola> listar() {
-        return repository.findAll();
+        LocalDate hoje = LocalDate.now();
+
+        return repository.findAll().stream()
+                .sorted(Comparator
+                        .comparingLong((Escola escola) -> prioridadeDataFesta(escola, hoje))
+                        .thenComparing(Escola::getNomeEscola, Comparator.nullsLast(String::compareToIgnoreCase)))
+                .toList();
+    }
+
+    private static long prioridadeDataFesta(Escola escola, LocalDate hoje) {
+        LocalDate dataFesta = dataFestaOrdenacao(escola);
+        if (dataFesta == null) {
+            return Long.MAX_VALUE;
+        }
+        if (dataFesta.isBefore(hoje)) {
+            return (Long.MAX_VALUE / 2) + ChronoUnit.DAYS.between(dataFesta, hoje);
+        }
+        return ChronoUnit.DAYS.between(hoje, dataFesta);
+    }
+
+    private static LocalDate dataFestaOrdenacao(Escola escola) {
+        String dataFesta = escola.getDataBaileFormatura();
+        if (dataFesta == null || dataFesta.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(dataFesta);
+        } catch (DateTimeParseException exception) {
+            return null;
+        }
     }
 
     @PostMapping

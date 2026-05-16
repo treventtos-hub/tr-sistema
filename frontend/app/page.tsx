@@ -13,6 +13,7 @@ type Aluno = {
   telefone?: string;
   escola?: string;
   turma?: string;
+  formaPagamento?: string;
   valorContrato?: number;
   valorRestanteContrato?: number;
   valorMensal?: number;
@@ -112,6 +113,7 @@ export default function Home() {
     escolaId: "",
     escola: "",
     turma: "",
+    formaPagamento: "",
     parcelas: "",
     baile: false,
     kitFormatura: false,
@@ -437,7 +439,7 @@ export default function Home() {
   }
 
   function resetAlunoForm() {
-    setAlunoForm({ nome: "", nomeResponsavel: "", telefoneResponsavel: "", telefone: "", escolaId: "", escola: "", turma: "", parcelas: "", baile: false, kitFormatura: false, placaHomenagem: false, quantidadePlacaHomenagem: "1", placaReplica: false, quantidadePlacaReplica: "1" });
+    setAlunoForm({ nome: "", nomeResponsavel: "", telefoneResponsavel: "", telefone: "", escolaId: "", escola: "", turma: "", formaPagamento: "", parcelas: "", baile: false, kitFormatura: false, placaHomenagem: false, quantidadePlacaHomenagem: "1", placaReplica: false, quantidadePlacaReplica: "1" });
     setAlunoEditando(null);
   }
 
@@ -738,6 +740,7 @@ export default function Home() {
       escolaId: escolaDoAluno?.id.toString() || "",
       escola: aluno.escola || "",
       turma: aluno.turma || "",
+      formaPagamento: aluno.formaPagamento || "",
       parcelas: aluno.parcelas ? aluno.parcelas.toString() : "",
       baile: Boolean(aluno.baile),
       kitFormatura: Boolean(aluno.kitFormatura),
@@ -967,9 +970,18 @@ export default function Home() {
   function abrirResumoFinanceiro(alunoResumo: Aluno) {
     const escolaResumo = buscarEscolaDoAluno(alunoResumo);
     const servicos = servicosDoAluno(alunoResumo);
+    const formaPagamentoTexto = alunoResumo.formaPagamento || "Nao informada";
+    const parcelasTexto = alunoResumo.parcelas ? alunoResumo.parcelas.toString() : "0";
+    const valorMensalTexto = moeda(alunoResumo.valorMensal);
+    const itensContratoTexto = servicos.length
+      ? servicos
+          .map((servico) => `${servico.nome} x${servico.quantidade}: ${moeda(servico.valorUnitario * servico.quantidade)}`)
+          .join("; ")
+      : "Nenhum item marcado";
+    const textoResumoFinanceiro = `Itens fechados no contrato: ${itensContratoTexto}. Forma de pagamento: ${formaPagamentoTexto}. Valor da parcela mensal: ${valorMensalTexto}. Numero de parcelas: ${parcelasTexto}. Valor total do contrato: ${moeda(alunoResumo.valorContrato)}. Valor restante: ${moeda(alunoResumo.valorRestanteContrato ?? alunoResumo.valorContrato)}.`;
     const whatsappResumo = linkWhatsApp(
       alunoResumo.telefone,
-      `Olá, ${alunoResumo.nomeResponsavel || ""}. Segue o resumo financeiro do contrato do(a) aluno(a) ${alunoResumo.nome}. Valor total: ${moeda(alunoResumo.valorContrato)}. Valor restante: ${moeda(alunoResumo.valorRestanteContrato ?? alunoResumo.valorContrato)}.`
+      `Ola, ${alunoResumo.nomeResponsavel || ""}. Segue o resumo financeiro do contrato do(a) aluno(a) ${alunoResumo.nome}. ${textoResumoFinanceiro}`
     );
     const linhasServicos = servicos.length
       ? servicos.map((servico) => `
@@ -1011,8 +1023,13 @@ export default function Home() {
       <div><div class="label">Turma</div><div class="value">${alunoResumo.turma || "-"}</div></div>
       <div><div class="label">Data do baile</div><div class="value">${formatarData(escolaResumo?.dataBaileFormatura)}</div></div>
       <div><div class="label">Inicio do pagamento</div><div class="value">${formatarMes(escolaResumo?.mesInicioPagamento)}</div></div>
+      <div><div class="label">Forma de pagamento</div><div class="value">${formaPagamentoTexto}</div></div>
+      <div><div class="label">Valor da parcela mensal</div><div class="value">${valorMensalTexto}</div></div>
+      <div><div class="label">Numero de parcelas</div><div class="value">${parcelasTexto}</div></div>
       <div><div class="label">Senhas do contrato</div><div class="value">${escolaResumo?.quantidadeConvitesContrato ?? 0}</div></div>
     </div>
+    <div class="label">Texto do resumo financeiro</div>
+    <div class="value">${textoResumoFinanceiro}</div>
     <div class="label">Servicos marcados em contrato</div>
     <table>
       <thead>
@@ -1456,6 +1473,10 @@ export default function Home() {
               <div className="rounded-3xl bg-slate-50 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Parcelas</p>
                 <p className="mt-2 text-lg font-semibold text-slate-950">{alunoDetalhe.parcelas || 0}</p>
+              </div>
+              <div className="rounded-3xl bg-slate-50 p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Forma de pagamento</p>
+                <p className="mt-2 text-lg font-semibold text-slate-950">{alunoDetalhe.formaPagamento || "-"}</p>
               </div>
               <div className="rounded-3xl bg-slate-50 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Valor mensal</p>
@@ -2021,7 +2042,7 @@ export default function Home() {
               <button type="button" onClick={() => { resetAlunoForm(); setView("menu"); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
             </div>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <input type="text" placeholder="Nome" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="text" placeholder="Nome do aluno" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <input type="tel" placeholder="Telefone do aluno" value={alunoForm.telefone} onChange={(e) => setAlunoForm({ ...alunoForm, telefone: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <input type="text" placeholder="Nome do responsavel" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <input type="tel" placeholder="Telefone do responsavel" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
@@ -2032,6 +2053,13 @@ export default function Home() {
                 ))}
               </select>
               <input type="text" placeholder="Turma" value={alunoForm.turma} onChange={(e) => setAlunoForm({ ...alunoForm, turma: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <select value={alunoForm.formaPagamento} onChange={(e) => setAlunoForm({ ...alunoForm, formaPagamento: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="">Forma de pagamento</option>
+                <option value="Pix">Pix</option>
+                <option value="Dinheiro">Dinheiro</option>
+                <option value="Cartao de credito">Cartao de credito</option>
+                <option value="Cartao de debito">Cartao de debito</option>
+              </select>
               <input type="number" placeholder="Parcelas" value={alunoForm.parcelas} onChange={(e) => setAlunoForm({ ...alunoForm, parcelas: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <div className="rounded-3xl bg-slate-100 p-4"><span className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor do contrato</span><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorContratoAluno)}</p></div>
               <div className="rounded-3xl bg-slate-100 p-4"><span className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor mensal</span><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorMensalPreview)}</p></div>

@@ -69,6 +69,7 @@ public class AlunoController {
         aluno.setEscola(alunoAtualizado.getEscola());
         aluno.setTurma(alunoAtualizado.getTurma());
         aluno.setCategoria(alunoAtualizado.getCategoria());
+        aluno.setFormaPagamento(alunoAtualizado.getFormaPagamento());
         aluno.setBaile(alunoAtualizado.getBaile());
         aluno.setKitFormatura(alunoAtualizado.getKitFormatura());
         aluno.setPlacaHomenagem(alunoAtualizado.getPlacaHomenagem());

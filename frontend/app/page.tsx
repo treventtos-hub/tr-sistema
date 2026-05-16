@@ -2055,10 +2055,10 @@ export default function Home() {
               <input type="text" placeholder="Turma" value={alunoForm.turma} onChange={(e) => setAlunoForm({ ...alunoForm, turma: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <select value={alunoForm.formaPagamento} onChange={(e) => setAlunoForm({ ...alunoForm, formaPagamento: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
                 <option value="">Forma de pagamento</option>
+                <option value="Cartão">Cartão</option>
                 <option value="Pix">Pix</option>
                 <option value="Dinheiro">Dinheiro</option>
-                <option value="Cartao de credito">Cartao de credito</option>
-                <option value="Cartao de debito">Cartao de debito</option>
+                <option value="Débito">Débito</option>
               </select>
               <input type="number" placeholder="Parcelas" value={alunoForm.parcelas} onChange={(e) => setAlunoForm({ ...alunoForm, parcelas: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <div className="rounded-3xl bg-slate-100 p-4"><span className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor do contrato</span><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorContratoAluno)}</p></div>

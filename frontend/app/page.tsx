@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -78,6 +78,13 @@ type Demanda = {
   status: string;
 };
 
+type UsuarioSistema = {
+  id: number;
+  nome: string;
+  email: string;
+  perfil: string;
+};
+
 type HealthStatus = {
   serverOnline: boolean;
   databaseOnline: boolean;
@@ -146,11 +153,21 @@ export default function Home() {
   const [alunoEditando, setAlunoEditando] = useState<Aluno | null>(null);
   const [escolaEditando, setEscolaEditando] = useState<Escola | null>(null);
   const [mostrarAlunosEscola, setMostrarAlunosEscola] = useState(false);
-  const [departamentoAtivo, setDepartamentoAtivo] = useState("Administração");
+  const [departamentoAtivo, setDepartamentoAtivo] = useState("Administracao");
   const [filtroParcela, setFiltroParcela] = useState("todos");
   const [financeiroBusca, setFinanceiroBusca] = useState({ nome: "", responsavel: "", escola: "" });
   const [financeiroResultados, setFinanceiroResultados] = useState<Aluno[]>([]);
   const [financeiroBuscaRealizada, setFinanceiroBuscaRealizada] = useState(false);
+  const [usuariosCadastrados, setUsuariosCadastrados] = useState<UsuarioSistema[]>([]);
+  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", email: "", perfil: "Administrador" });
+  const [novaDemandaForm, setNovaDemandaForm] = useState({
+    titulo: "",
+    aluno: "",
+    departamento: "Financeiro",
+    responsavelId: "",
+    prioridade: "media",
+    comentario: ""
+  });
   const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
   const [comentarioDemanda, setComentarioDemanda] = useState("");
   const [demandaRemovida, setDemandaRemovida] = useState<Demanda | null>(null);
@@ -159,41 +176,7 @@ export default function Home() {
     databaseOnline: false,
     checked: false
   });
-  const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([
-    {
-      id: 1,
-      titulo: "Aluno pediu segunda via do contrato",
-      departamento: "Contratos",
-      responsavel: "Carla Admin",
-      prazo: "2026-05-22",
-      comentarios: ["Gerar segunda via e enviar por e-mail."],
-      anexos: [],
-      prioridade: "media",
-      status: "aberta"
-    },
-    {
-      id: 2,
-      titulo: "Aluno enviou comprovante",
-      departamento: "Financeiro",
-      responsavel: "Ana Financeiro",
-      prazo: "2026-05-20",
-      comentarios: ["Conferir valor parcial recebido."],
-      anexos: ["entrada-rafael.jpg"],
-      prioridade: "alta",
-      status: "em andamento"
-    },
-    {
-      id: 3,
-      titulo: "Aluno pediu cancelamento",
-      departamento: "Distratos",
-      responsavel: "Bruno Atendimento",
-      prazo: "2026-05-24",
-      comentarios: ["Validar contrato antes de iniciar distrato."],
-      anexos: [],
-      prioridade: "urgente",
-      status: "aberta"
-    }
-  ]);
+  const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([]);
 
   const indicadores = useMemo(() => {
     return {
@@ -293,7 +276,7 @@ export default function Home() {
     { id: "escolas" as ViewMode, label: "Turmas/Eventos", helper: "Escolas, turmas e valores", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
     { id: "financeiro" as ViewMode, label: "Financeiro", helper: "Pagamentos, resumo e recibos", action: () => { setView("financeiro"); listarTodos(); listarEscolas(); } },
     { id: "tarefas" as ViewMode, label: "Tarefas", helper: "Rotinas internas", action: () => setView("tarefas") },
-    { id: "usuarios" as ViewMode, label: "Usuários e permissões", helper: "Acessos", action: () => setView("usuarios") }
+    { id: "usuarios" as ViewMode, label: "UsuÃ¡rios e permissÃµes", helper: "Acessos", action: () => setView("usuarios") }
   ];
   const titulosView: Record<ViewMode, { label: string; helper: string }> = {
     menu: { label: "Painel inicial", helper: "Visao geral do sistema antigo dentro do novo layout." },
@@ -308,7 +291,7 @@ export default function Home() {
   const currentNav = titulosView[view];
   const infraOnline = healthStatus.serverOnline && healthStatus.databaseOnline;
   const totalTarefasAbertas = demandasInternas.filter((demanda) => demanda.status !== "concluida").length;
-  const totalUsuarios = 0;
+  const totalUsuarios = usuariosCadastrados.length;
   const dataPainel = useMemo(
     () =>
       new Date().toLocaleDateString("pt-BR", {
@@ -342,7 +325,7 @@ export default function Home() {
     const response = await fetch(input, { ...init, headers });
     if (response.status === 401) {
       sair();
-      alert("Sua sessão expirou. Faça login novamente.");
+      alert("Sua sessÃ£o expirou. FaÃ§a login novamente.");
     }
     return response;
   }
@@ -393,52 +376,231 @@ export default function Home() {
   }
 
   async function executarBackup() {
-    alert("Backup local/manual. Execute no servidor: backend/scripts/backup-trcrm.ps1");
+    const data = new Date();
+    const timestamp = data.toISOString().replace(/[:.]/g, "-");
+    const conteudo = [
+      "# Backup local/manual - TR Sistema",
+      "",
+      "1) Abra o PowerShell na pasta backend do projeto.",
+      "2) Execute o script abaixo para gerar o backup:",
+      "",
+      "powershell -ExecutionPolicy Bypass -File .\\scripts\\backup-trcrm.ps1",
+      "",
+      "Observacao:",
+      "- O backup e gerado no servidor/ambiente onde o script for executado.",
+      "- Ajuste credenciais/variaveis conforme seu ambiente.",
+      "",
+      `Gerado em: ${data.toLocaleString("pt-BR")}`
+    ].join("\n");
+
+    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `backup-local-tr-sistema-${timestamp}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 
   function alunoEstaInadimplente(aluno: Aluno) {
     return (aluno.status || "").toLowerCase() === "inadimplente";
   }
 
-  function atualizarStatusDemanda(id: number, status: string) {
-    setDemandasInternas((demandas) => {
-      if (status === "concluida") {
-        setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
-        return demandas.filter((demanda) => demanda.id !== id);
+  async function atualizarStatusDemanda(id: number, status: string) {
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (!response.ok) {
+        throw new Error("Falha ao atualizar status.");
       }
-      return demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda));
-    });
+      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda)));
+    } catch {
+      alert("Nao foi possivel atualizar o status da tarefa.");
+    }
   }
 
-  function removerDemanda(id: number) {
+  async function restaurarBackup() {
+    if (!infraOnline) {
+      alert("Servidor ou banco offline. Nao foi possivel iniciar restore.");
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".dump,.backup,.sql";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
+      if (!confirmar) return;
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await apiFetch(`${apiUrl}/backup/restore`, {
+          method: "POST",
+          body: formData
+        });
+        if (!response.ok) {
+          const erro = await response.text();
+          throw new Error(erro || "Falha ao restaurar backup.");
+        }
+        await Promise.all([listarTodos(), listarEscolas(), carregarDemandas()]);
+        alert("Restore concluido com sucesso.");
+      } catch (error) {
+        const mensagem = error instanceof Error ? error.message : "Falha ao restaurar backup.";
+        alert(mensagem);
+      }
+    };
+    input.click();
+  }
+
+  async function removerDemanda(id: number) {
     const confirmar = window.confirm("Deseja apagar esta tarefa?");
     if (!confirmar) return;
-    setDemandasInternas((demandas) => {
-      const alvo = demandas.find((demanda) => demanda.id === id) || null;
+    const alvo = demandasInternas.find((demanda) => demanda.id === id) || null;
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error("Falha ao apagar tarefa.");
+      }
+      setDemandasInternas((demandas) => demandas.filter((demanda) => demanda.id !== id));
       setDemandaRemovida(alvo);
-      return demandas.filter((demanda) => demanda.id !== id);
-    });
-    setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
+      setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
+    } catch {
+      alert("Nao foi possivel apagar a tarefa.");
+    }
   }
 
-  function desfazerRemocaoDemanda() {
+  async function desfazerRemocaoDemanda() {
     if (!demandaRemovida) return;
-    setDemandasInternas((demandas) => [demandaRemovida, ...demandas]);
-    setDemandaRemovida(null);
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...demandaRemovida, id: undefined })
+      });
+      if (!response.ok) {
+        throw new Error("Falha ao desfazer remocao.");
+      }
+      const criada = await response.json();
+      setDemandasInternas((demandas) => [criada, ...demandas]);
+      setDemandaRemovida(null);
+    } catch {
+      alert("Nao foi possivel desfazer a remocao.");
+    }
   }
 
-  function adicionarComentarioDemanda() {
+  function salvarUsuarioSistema() {
+    const nome = novoUsuarioForm.nome.trim();
+    const email = novoUsuarioForm.email.trim();
+    if (!nome || !email) {
+      alert("Informe nome e e-mail do usuÃ¡rio.");
+      return;
+    }
+
+    const existe = usuariosCadastrados.some((usuario) => usuario.email.toLowerCase() === email.toLowerCase());
+    if (existe) {
+      alert("JÃ¡ existe um usuÃ¡rio com este e-mail.");
+      return;
+    }
+
+    const novoUsuario: UsuarioSistema = {
+      id: Date.now(),
+      nome,
+      email,
+      perfil: novoUsuarioForm.perfil
+    };
+    setUsuariosCadastrados((usuarios) => [novoUsuario, ...usuarios]);
+    setNovoUsuarioForm({ nome: "", email: "", perfil: "Administrador" });
+    alert("UsuÃ¡rio cadastrado no mÃ³dulo.");
+  }
+
+  async function salvarDemanda() {
+    if (!infraOnline) {
+      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
+      return;
+    }
+
+    const titulo = novaDemandaForm.titulo.trim();
+    if (!titulo) {
+      alert("Informe a descriÃ§Ã£o da demanda.");
+      return;
+    }
+    if (!novaDemandaForm.responsavelId) {
+      alert("Selecione um responsÃ¡vel cadastrado.");
+      return;
+    }
+
+    const responsavel = usuariosCadastrados.find((usuario) => usuario.id.toString() === novaDemandaForm.responsavelId);
+    if (!responsavel) {
+      alert("ResponsÃ¡vel nÃ£o encontrado.");
+      return;
+    }
+
+    const demanda: Omit<Demanda, "id"> = {
+      titulo,
+      aluno: novaDemandaForm.aluno || "Aluno",
+      departamento: novaDemandaForm.departamento,
+      responsavel: responsavel.nome,
+      prazo: new Date().toISOString().slice(0, 10),
+      comentarios: novaDemandaForm.comentario.trim() ? [novaDemandaForm.comentario.trim()] : [],
+      anexos: [],
+      prioridade: novaDemandaForm.prioridade,
+      status: "aberta"
+    };
+
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(demanda)
+      });
+      if (!response.ok) {
+        throw new Error("Falha ao salvar demanda.");
+      }
+      const criada = await response.json();
+      setDemandasInternas((demandas) => [criada, ...demandas]);
+      setNovaDemandaForm({
+        titulo: "",
+        aluno: "",
+        departamento: "Financeiro",
+        responsavelId: "",
+        prioridade: "media",
+        comentario: ""
+      });
+      alert("Demanda criada.");
+    } catch {
+      alert("Nao foi possivel salvar a demanda.");
+    }
+  }
+
+  async function adicionarComentarioDemanda() {
     const comentario = comentarioDemanda.trim();
     if (!demandaSelecionadaId || !comentario) return;
-
-    setDemandasInternas((demandas) =>
-      demandas.map((demanda) =>
-        demanda.id === demandaSelecionadaId
-          ? { ...demanda, comentarios: [...demanda.comentarios, comentario] }
-          : demanda
-      )
-    );
-    setComentarioDemanda("");
+    const alvo = demandasInternas.find((demanda) => demanda.id === demandaSelecionadaId);
+    if (!alvo) return;
+    const atualizada: Demanda = { ...alvo, comentarios: [...alvo.comentarios, comentario] };
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas/${alvo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(atualizada)
+      });
+      if (!response.ok) {
+        throw new Error("Falha ao comentar demanda.");
+      }
+      const payload = await response.json();
+      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === payload.id ? payload : demanda)));
+      setComentarioDemanda("");
+    } catch {
+      alert("Nao foi possivel adicionar o comentario.");
+    }
   }
 
   function resetAlunoForm() {
@@ -624,6 +786,17 @@ export default function Home() {
     setEscolas(await response.json());
   }
 
+  async function carregarDemandas() {
+    try {
+      const response = await apiFetch(`${apiUrl}/demandas`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      setDemandasInternas(Array.isArray(payload) ? payload : []);
+    } catch {
+      setDemandasInternas([]);
+    }
+  }
+
   async function carregarSaudeInfra() {
     try {
       const response = await fetch(`${apiUrl}/health`);
@@ -648,6 +821,7 @@ export default function Home() {
 
     listarTodos();
     listarEscolas();
+    carregarDemandas();
     const initialHealthCheck = window.setTimeout(() => {
       carregarSaudeInfra();
     }, 0);
@@ -974,7 +1148,7 @@ export default function Home() {
     const parcelaTexto = pagamentoRecibo.numeroParcela ? `Parcela ${pagamentoRecibo.numeroParcela}` : "Parcela nao informada";
     const whatsappRecibo = linkWhatsApp(
       alunoRecibo.telefone,
-      `Olá, ${alunoRecibo.nomeResponsavel || ""}. Segue o recibo de pagamento do(a) aluno(a) ${alunoRecibo.nome}, no valor de ${moeda(pagamentoRecibo.valor)}, referente a ${parcelaTexto}.`
+      `OlÃ¡, ${alunoRecibo.nomeResponsavel || ""}. Segue o recibo de pagamento do(a) aluno(a) ${alunoRecibo.nome}, no valor de ${moeda(pagamentoRecibo.valor)}, referente a ${parcelaTexto}.`
     );
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1193,8 +1367,8 @@ export default function Home() {
       <section className="space-y-7">
         <div className="grid gap-5 xl:grid-cols-4">
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Em aberto</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{moeda(financeiroResumo.contratado)}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
@@ -1218,7 +1392,7 @@ export default function Home() {
                 <div key={demanda.titulo} className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="text-xl font-semibold text-slate-950">{demanda.titulo}</p>
-                    <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
+                    <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} Â· {demanda.departamento}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
@@ -1243,7 +1417,7 @@ export default function Home() {
                 ["Contratos", "1 abertas"],
                 ["Eventos", "0 abertas"],
                 ["Distratos", "1 abertas"],
-                ["Administração", "0 abertas"]
+                ["Administracao", "0 abertas"]
               ].map(([departamento, abertas]) => (
                 <div key={departamento} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-5">
                   <p className="text-xl font-semibold text-slate-950">{departamento}</p>
@@ -1265,14 +1439,14 @@ export default function Home() {
       alta: "bg-amber-100 text-amber-800",
       urgente: "bg-rose-100 text-rose-800"
     };
-    const departamentosResumo = ["Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administração"];
+    const departamentosResumo = ["Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administracao"];
 
     return (
       <section className="space-y-7">
         <div className="grid gap-5 xl:grid-cols-4">
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Em aberto</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{moeda(financeiroResumo.contratado)}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
@@ -1319,14 +1493,14 @@ export default function Home() {
 
                   {demandaSelecionadaId === demanda.id && (
                     <div className="mt-4 border-t border-slate-200 pt-4" onClick={(e) => e.stopPropagation()}>
-                      <p className="text-sm font-semibold text-slate-700">Comentários</p>
+                      <p className="text-sm font-semibold text-slate-700">ComentÃ¡rios</p>
                       <div className="mt-2 space-y-2 text-sm text-[#08265f]">
                         {demanda.comentarios.map((comentario, index) => (
                           <p key={`${demanda.id}-${index}`} className="rounded-xl bg-white px-4 py-3">{comentario}</p>
                         ))}
                       </div>
                       <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentário" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentÃ¡rio" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
                         <button type="button" onClick={adicionarComentarioDemanda} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Comentar</button>
                       </div>
                     </div>
@@ -1912,7 +2086,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-700">Conta de pagamento</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">{alunoSelecionado.nome}</h2>
-              <p className="mt-1 text-sm text-slate-600">{alunoSelecionado.nomeResponsavel || "-"} · {alunoSelecionado.escola || "-"}</p>
+              <p className="mt-1 text-sm text-slate-600">{alunoSelecionado.nomeResponsavel || "-"} Â· {alunoSelecionado.escola || "-"}</p>
             </div>
             <button type="button" onClick={() => setAlunoSelecionado(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Fechar</button>
           </div>
@@ -2057,7 +2231,7 @@ export default function Home() {
                   <th className="px-5 py-4 font-semibold">Valor</th>
                   <th className="px-5 py-4 font-semibold">Comprovante</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">Ações</th>
+                  <th className="px-5 py-4 font-semibold">AÃ§Ãµes</th>
                 </tr>
               </thead>
               <tbody>
@@ -2099,7 +2273,12 @@ export default function Home() {
   }
 
   function tarefasView() {
-    const demandas = demandasInternas.filter((demanda) => demanda.status !== "concluida");
+    const departamentos = ["todos", "Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administracao", "concluidas"];
+    const demandas = demandasInternas.filter((demanda) => {
+      if (departamentoAtivo === "concluidas") return demanda.status === "concluida";
+      if (departamentoAtivo === "todos") return true;
+      return demanda.departamento === departamentoAtivo;
+    });
     const prioridadeClasse: Record<string, string> = {
       media: "bg-sky-100 text-sky-800",
       alta: "bg-amber-100 text-amber-800",
@@ -2111,40 +2290,51 @@ export default function Home() {
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold text-slate-950">Criar demanda</h2>
           <div className="mt-6 space-y-4">
-            <input type="text" placeholder="Descrição da demanda" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>Aluno vinculado</option>
+            <input type="text" placeholder="DescriÃ§Ã£o da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <select value={novaDemandaForm.aluno} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="">Aluno vinculado</option>
               {alunos.map((aluno) => (
-                <option key={aluno.id}>{aluno.nome}</option>
+                <option key={aluno.id} value={aluno.nome}>{aluno.nome}</option>
               ))}
             </select>
-            <select className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>Financeiro</option>
-              <option>Atendimento</option>
-              <option>Contratos</option>
-              <option>Eventos</option>
-              <option>Distratos</option>
-              <option>Administração</option>
+            <select value={novaDemandaForm.departamento} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, departamento: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="Financeiro">Financeiro</option>
+              <option value="Atendimento">Atendimento</option>
+              <option value="Contratos">Contratos</option>
+              <option value="Eventos">Eventos</option>
+              <option value="Distratos">Distratos</option>
+              <option value="Administracao">Administracao</option>
             </select>
-            <input type="text" placeholder="Responsável" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="date" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>media</option>
-              <option>baixa</option>
-              <option>alta</option>
-              <option>urgente</option>
+            <select value={novaDemandaForm.responsavelId} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, responsavelId: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="">ResponsÃ¡vel (usuÃ¡rio cadastrado)</option>
+              {usuariosCadastrados.map((usuario) => (
+                <option key={usuario.id} value={usuario.id}>{usuario.nome}</option>
+              ))}
             </select>
-            <textarea placeholder="Comentário inicial" className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <button type="button" className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-lg font-semibold text-white transition hover:bg-slate-800">Salvar demanda</button>
+            <select value={novaDemandaForm.prioridade} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, prioridade: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="media">media</option>
+              <option value="alta">alta</option>
+              <option value="urgente">urgente</option>
+            </select>
+            <textarea placeholder="ComentÃ¡rio inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <button type="button" onClick={salvarDemanda} disabled={!infraOnline || usuariosCadastrados.length === 0} className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-lg font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar demanda</button>
+            {usuariosCadastrados.length === 0 && (
+              <p className="text-sm text-amber-700">Cadastre ao menos um usuÃ¡rio para selecionar o responsÃ¡vel da tarefa.</p>
+            )}
           </div>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold text-slate-950">Fila por departamento</h2>
           <div className="mt-6 flex flex-wrap gap-3">
-            {["todos", "Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administração"].map((departamento, index) => (
-              <button key={departamento} type="button" className={`rounded-xl border px-5 py-3 text-xl transition ${index === 0 ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}>
-                {departamento}
+            {departamentos.map((departamento) => (
+              <button
+                key={departamento}
+                type="button"
+                onClick={() => setDepartamentoAtivo(departamento)}
+                className={`rounded-xl border px-5 py-3 text-xl transition ${departamentoAtivo === departamento ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}
+              >
+                {departamento === "concluidas" ? "Concluídas" : departamento}
               </button>
             ))}
           </div>
@@ -2155,17 +2345,17 @@ export default function Home() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-2xl font-semibold text-slate-950">{demanda.titulo}</h3>
-                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
+                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno} Â· {demanda.departamento}</p>
                     <div className="mt-5 space-y-2 text-lg text-[#08265f]">
-                      <p>Responsável: {demanda.responsavel}</p>
+                      <p>ResponsÃ¡vel: {demanda.responsavel}</p>
                       <p>Prazo: {demanda.prazo}</p>
-                      <p>Comentários: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
+                      <p>ComentÃ¡rios: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
                       <p>Anexos: {demanda.anexos.length ? demanda.anexos.join(" | ") : "-"}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                    <select value={demanda.status} onChange={() => undefined} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xl text-slate-950">
+                    <select value={demanda.status} onChange={(e) => atualizarStatusDemanda(demanda.id, e.target.value)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xl text-slate-950">
                       <option value="aberta">aberta</option>
                       <option value="em andamento">em andamento</option>
                       <option value="aguardando">aguardando</option>
@@ -2183,30 +2373,39 @@ export default function Home() {
       </section>
     );
   }
-
   function usuariosView() {
     return (
       <section className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-950">Novo usuário</h2>
           <div className="mt-4 space-y-3">
-            <input type="text" placeholder="Nome" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="email" placeholder="E-mail" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>Administrador</option>
-              <option>Financeiro</option>
-              <option>Atendimento</option>
-              <option>Consulta</option>
+            <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="email" placeholder="E-mail" value={novoUsuarioForm.email} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, email: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <select value={novoUsuarioForm.perfil} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, perfil: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="Administrador">Administrador</option>
+              <option value="Financeiro">Financeiro</option>
+              <option value="Atendimento">Atendimento</option>
+              <option value="Consulta">Consulta</option>
             </select>
-            <button type="button" className="w-full rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Salvar usuário</button>
+            <button type="button" onClick={salvarUsuarioSistema} disabled={!infraOnline} className="w-full rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar usuário</button>
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-950">Usuários e permissões</h2>
-          <p className="mt-2 text-sm text-slate-600">Area visual restaurada para manter o menu completo. Ainda sem persistencia conectada na API antiga.</p>
+          <p className="mt-2 text-sm text-slate-600">Area visual restaurada para manter o menu completo. Ainda sem persistência conectada na API antiga.</p>
           <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-            Nenhum usuário configurado neste módulo.
+            {usuariosCadastrados.length === 0 ? (
+              "Nenhum usuário configurado neste módulo."
+            ) : (
+              <ul className="space-y-2">
+                {usuariosCadastrados.map((usuario) => (
+                  <li key={usuario.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700">
+                    <strong>{usuario.nome}</strong> - {usuario.email} - {usuario.perfil}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </section>
@@ -2373,7 +2572,7 @@ export default function Home() {
                   <th className="px-5 py-4 font-medium">Kit</th>
                   <th className="px-5 py-4 font-medium">Replica</th>
                   <th className="px-5 py-4 font-medium">Homenagem</th>
-                  <th className="px-5 py-4 font-medium">Ações</th>
+                  <th className="px-5 py-4 font-medium">AÃ§Ãµes</th>
                 </tr>
               </thead>
               <tbody>
@@ -2420,8 +2619,8 @@ export default function Home() {
           <div className="mt-4 space-y-3">
             <input type="text" placeholder="Nome" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <input type="tel" placeholder="Telefone" value={alunoForm.telefone} onChange={(e) => setAlunoForm({ ...alunoForm, telefone: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="text" placeholder="Responsável" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="tel" placeholder="Telefone do responsável" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="ResponsÃ¡vel" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="tel" placeholder="Telefone do responsÃ¡vel" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <select value={alunoForm.escolaId} onChange={(e) => setAlunoForm({ ...alunoForm, escolaId: e.target.value, escola: escolas.find((escola) => escola.id.toString() === e.target.value)?.nomeEscola || "" })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Selecione a escola</option>
               {escolas.map((escola) => (
@@ -2496,7 +2695,7 @@ export default function Home() {
           <h2 className="text-2xl font-semibold text-slate-950">Base de alunos</h2>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <input type="text" placeholder="Buscar por nome, CPF, e-mail ou responsável" value={search.nome} onChange={(e) => setSearch({ ...search, nome: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="Buscar por nome, CPF, e-mail ou responsÃ¡vel" value={search.nome} onChange={(e) => setSearch({ ...search, nome: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <select value={alunoEscolaFiltro} onChange={(e) => setAlunoEscolaFiltro(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Todas as turmas</option>
               {escolas.map((escola) => (
@@ -2511,9 +2710,9 @@ export default function Home() {
                 <tr>
                   <th className="px-5 py-4 font-semibold">Aluno</th>
                   <th className="px-5 py-4 font-semibold">Turma</th>
-                  <th className="px-5 py-4 font-semibold">Responsável</th>
+                  <th className="px-5 py-4 font-semibold">ResponsÃ¡vel</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">Histórico</th>
+                  <th className="px-5 py-4 font-semibold">HistÃ³rico</th>
                 </tr>
               </thead>
               <tbody>
@@ -2634,17 +2833,17 @@ export default function Home() {
           <div className="mt-14 rounded-2xl border border-slate-200 bg-slate-50 p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Departamento ativo</p>
             <select value={departamentoAtivo} onChange={(e) => setDepartamentoAtivo(e.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-lg text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>Administração</option>
+              <option>Administracao</option>
               <option>Financeiro</option>
               <option>Atendimento</option>
               <option>Contratos</option>
               <option>Eventos</option>
             </select>
             <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-[#08265f]">
-              <span className="rounded-lg bg-white px-3 py-2">Usuários</span>
-              <span className="rounded-lg bg-white px-3 py-2">Permissões</span>
+              <span className="rounded-lg bg-white px-3 py-2">UsuÃ¡rios</span>
+              <span className="rounded-lg bg-white px-3 py-2">PermissÃµes</span>
               <span className="rounded-lg bg-white px-3 py-2">Departamentos</span>
-              <span className="rounded-lg bg-white px-3 py-2">Configurações</span>
+              <span className="rounded-lg bg-white px-3 py-2">ConfiguraÃ§Ãµes</span>
             </div>
           </div>
         </aside>
@@ -2666,6 +2865,9 @@ export default function Home() {
                 </div>
                 <button type="button" onClick={executarBackup} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
                   Backup local
+                </button>
+                <button type="button" onClick={restaurarBackup} disabled={!infraOnline} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+                  Restore
                 </button>
                 <button type="button" onClick={sair} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
                   Sair
@@ -2727,6 +2929,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 

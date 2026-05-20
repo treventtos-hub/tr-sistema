@@ -1,181 +1,235 @@
 package com.tr.backend.controller;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.util.StringUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tr.backend.model.Aluno;
+import com.tr.backend.model.ComissaoFormatura;
+import com.tr.backend.model.Demanda;
+import com.tr.backend.model.Escola;
+import com.tr.backend.model.ObservacaoAluno;
+import com.tr.backend.model.Pagamento;
+import com.tr.backend.repository.AlunoRepository;
+import com.tr.backend.repository.ComissaoFormaturaRepository;
+import com.tr.backend.repository.DemandaRepository;
+import com.tr.backend.repository.EscolaRepository;
+import com.tr.backend.repository.ObservacaoAlunoRepository;
+import com.tr.backend.repository.PagamentoRepository;
+import jakarta.transaction.Transactional;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR;
 
 @RestController
 @RequestMapping("/backup")
 @CrossOrigin("*")
 public class BackupController {
 
-    @Value("${spring.datasource.url}")
-    private String datasourceUrl;
+    private final AlunoRepository alunoRepository;
+    private final EscolaRepository escolaRepository;
+    private final PagamentoRepository pagamentoRepository;
+    private final ComissaoFormaturaRepository comissaoFormaturaRepository;
+    private final ObservacaoAlunoRepository observacaoAlunoRepository;
+    private final DemandaRepository demandaRepository;
+    private final ObjectMapper objectMapper;
 
-    @Value("${spring.datasource.username}")
-    private String datasourceUsername;
+    public BackupController(
+            AlunoRepository alunoRepository,
+            EscolaRepository escolaRepository,
+            PagamentoRepository pagamentoRepository,
+            ComissaoFormaturaRepository comissaoFormaturaRepository,
+            ObservacaoAlunoRepository observacaoAlunoRepository,
+            DemandaRepository demandaRepository,
+            ObjectMapper objectMapper
+    ) {
+        this.alunoRepository = alunoRepository;
+        this.escolaRepository = escolaRepository;
+        this.pagamentoRepository = pagamentoRepository;
+        this.comissaoFormaturaRepository = comissaoFormaturaRepository;
+        this.observacaoAlunoRepository = observacaoAlunoRepository;
+        this.demandaRepository = demandaRepository;
+        this.objectMapper = objectMapper;
+    }
 
-    @Value("${spring.datasource.password:}")
-    private String datasourcePassword;
-
-    @PostMapping
-    public Map<String, String> executarBackup() {
-        File script = new File("scripts/backup-trcrm.ps1");
-
-        if (!script.exists()) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Script de backup nao encontrado.");
-        }
-
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportarBackup() {
         try {
-            Process process = new ProcessBuilder(
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    script.getAbsolutePath()
-            )
-                    .directory(new File("."))
-                    .redirectErrorStream(true)
-                    .start();
+            BackupPayload payload = new BackupPayload();
+            payload.generatedAt = LocalDateTime.now().toString();
+            payload.alunos = alunoRepository.findAll();
+            payload.escolas = escolaRepository.findAll();
+            payload.comissoes = comissaoFormaturaRepository.findAll();
+            payload.demandas = demandaRepository.findAll();
 
-            boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            payload.pagamentos = pagamentoRepository.findAll().stream().map((pagamento) -> {
+                BackupPagamento dto = new BackupPagamento();
+                dto.id = pagamento.getId();
+                dto.alunoId = pagamento.getAluno() != null ? pagamento.getAluno().getId() : null;
+                dto.nomeAluno = pagamento.getNomeAluno();
+                dto.valor = pagamento.getValor();
+                dto.numeroParcela = pagamento.getNumeroParcela();
+                dto.dataPagamento = pagamento.getDataPagamento();
+                dto.descricao = pagamento.getDescricao();
+                return dto;
+            }).toList();
 
-            if (!finished) {
-                process.destroyForcibly();
-                throw new ResponseStatusException(HttpStatus.REQUEST_TIMEOUT, "Backup demorou demais para concluir.");
-            }
+            payload.observacoes = observacaoAlunoRepository.findAll().stream().map((obs) -> {
+                BackupObservacao dto = new BackupObservacao();
+                dto.id = obs.getId();
+                dto.alunoId = obs.getAluno() != null ? obs.getAluno().getId() : null;
+                dto.texto = obs.getTexto();
+                dto.dataCriacao = obs.getDataCriacao();
+                return dto;
+            }).toList();
 
-            if (process.exitValue() != 0) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, output.isBlank() ? "Falha ao executar backup." : output);
-            }
-
-            return Map.of("status", "Backup concluido");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Backup interrompido.");
+            byte[] body = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(payload);
+            String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=trcrm-backup-" + stamp + ".json")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body);
         } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "Falha ao gerar backup: " + e.getMessage());
         }
     }
 
     @PostMapping("/restore")
+    @Transactional
     public Map<String, String> restaurarBackup(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Arquivo de backup nao enviado.");
+            throw new ResponseStatusException(BAD_REQUEST, "Arquivo de backup nao enviado.");
+        }
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        if (!name.endsWith(".json")) {
+            throw new ResponseStatusException(BAD_REQUEST, "Formato invalido. Envie um arquivo .json de backup.");
         }
 
-        String filename = StringUtils.cleanPath(file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
-        String lower = filename.toLowerCase();
-        boolean isDump = lower.endsWith(".dump") || lower.endsWith(".backup");
-        boolean isSql = lower.endsWith(".sql");
-
-        if (!isDump && !isSql) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formato nao suportado. Envie .dump, .backup ou .sql.");
-        }
-
-        JdbcInfo jdbcInfo = parseJdbcUrl(datasourceUrl);
-        Path tempFile = null;
+        BackupPayload payload;
         try {
-            tempFile = Files.createTempFile("restore-trcrm-", isSql ? ".sql" : ".dump");
-            file.transferTo(tempFile.toFile());
+            payload = objectMapper.readValue(file.getBytes(), BackupPayload.class);
+        } catch (IOException e) {
+            throw new ResponseStatusException(BAD_REQUEST, "Arquivo de backup invalido.");
+        }
 
-            List<String> command = new ArrayList<>();
-            if (isSql) {
-                command.add("psql");
-                command.add("--host");
-                command.add(jdbcInfo.host());
-                command.add("--port");
-                command.add(jdbcInfo.port());
-                command.add("--username");
-                command.add(datasourceUsername);
-                command.add("--dbname");
-                command.add(jdbcInfo.database());
-                command.add("--file");
-                command.add(tempFile.toAbsolutePath().toString());
-            } else {
-                command.add("pg_restore");
-                command.add("--clean");
-                command.add("--if-exists");
-                command.add("--no-owner");
-                command.add("--no-privileges");
-                command.add("--host");
-                command.add(jdbcInfo.host());
-                command.add("--port");
-                command.add(jdbcInfo.port());
-                command.add("--username");
-                command.add(datasourceUsername);
-                command.add("--dbname");
-                command.add(jdbcInfo.database());
-                command.add(tempFile.toAbsolutePath().toString());
-            }
+        observacaoAlunoRepository.deleteAll();
+        pagamentoRepository.deleteAll();
+        comissaoFormaturaRepository.deleteAll();
+        demandaRepository.deleteAll();
+        alunoRepository.deleteAll();
+        escolaRepository.deleteAll();
 
-            ProcessBuilder builder = new ProcessBuilder(command);
-            builder.redirectErrorStream(true);
-            if (!datasourcePassword.isBlank()) {
-                builder.environment().put("PGPASSWORD", datasourcePassword);
+        Map<Long, Long> escolaMap = new HashMap<>();
+        for (Escola escola : safe(payload.escolas)) {
+            Long oldId = escola.getId();
+            escola.setId(null);
+            Escola saved = escolaRepository.save(escola);
+            if (oldId != null) {
+                escolaMap.put(oldId, saved.getId());
             }
-            Process process = builder.start();
+        }
 
-            boolean finished = process.waitFor(5, TimeUnit.MINUTES);
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (!finished) {
-                process.destroyForcibly();
-                throw new ResponseStatusException(HttpStatus.REQUEST_TIMEOUT, "Restore demorou demais para concluir.");
+        Map<Long, Long> alunoMap = new HashMap<>();
+        for (Aluno aluno : safe(payload.alunos)) {
+            Long oldId = aluno.getId();
+            aluno.setId(null);
+            Aluno saved = alunoRepository.save(aluno);
+            if (oldId != null) {
+                alunoMap.put(oldId, saved.getId());
             }
-            if (process.exitValue() != 0) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, output.isBlank() ? "Falha ao restaurar backup." : output);
-            }
+        }
 
-            return Map.of("status", "Restore concluido", "arquivo", filename);
-        } catch (ResponseStatusException e) {
-            throw e;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Restore interrompido.");
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (Exception ignored) {
+        for (BackupPagamento dto : safe(payload.pagamentos)) {
+            Pagamento pagamento = new Pagamento();
+            pagamento.setNomeAluno(dto.nomeAluno);
+            pagamento.setValor(dto.valor);
+            pagamento.setNumeroParcela(dto.numeroParcela);
+            pagamento.setDataPagamento(dto.dataPagamento);
+            pagamento.setDescricao(dto.descricao);
+            if (dto.alunoId != null) {
+                Long novoAlunoId = alunoMap.get(dto.alunoId);
+                if (novoAlunoId != null) {
+                    alunoRepository.findById(novoAlunoId).ifPresent(pagamento::setAluno);
                 }
             }
+            pagamentoRepository.save(pagamento);
         }
+
+        for (ComissaoFormatura comissao : safe(payload.comissoes)) {
+            comissao.setId(null);
+            if (comissao.getEscolaId() != null && escolaMap.containsKey(comissao.getEscolaId())) {
+                comissao.setEscolaId(escolaMap.get(comissao.getEscolaId()));
+            }
+            if (comissao.getAlunoId() != null && alunoMap.containsKey(comissao.getAlunoId())) {
+                comissao.setAlunoId(alunoMap.get(comissao.getAlunoId()));
+            }
+            comissaoFormaturaRepository.save(comissao);
+        }
+
+        for (Demanda demanda : safe(payload.demandas)) {
+            demanda.setId(null);
+            demandaRepository.save(demanda);
+        }
+
+        for (BackupObservacao dto : safe(payload.observacoes)) {
+            if (dto.alunoId == null) continue;
+            Long novoAlunoId = alunoMap.get(dto.alunoId);
+            if (novoAlunoId == null) continue;
+            alunoRepository.findById(novoAlunoId).ifPresent(aluno -> {
+                ObservacaoAluno obs = new ObservacaoAluno();
+                obs.setAluno(aluno);
+                obs.setTexto(dto.texto);
+                obs.setDataCriacao(dto.dataCriacao);
+                observacaoAlunoRepository.save(obs);
+            });
+        }
+
+        return Map.of("status", "Restore concluido");
     }
 
-    private JdbcInfo parseJdbcUrl(String jdbcUrl) {
-        Pattern pattern = Pattern.compile("^jdbc:postgresql://([^/:]+)(?::(\\d+))?/([^?]+).*$");
-        Matcher matcher = pattern.matcher(jdbcUrl);
-        if (!matcher.matches()) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "URL do banco invalida para restore.");
-        }
-        String host = matcher.group(1);
-        String port = matcher.group(2) == null ? "5432" : matcher.group(2);
-        String database = matcher.group(3);
-        return new JdbcInfo(host, port, database);
+    private <T> List<T> safe(List<T> list) {
+        return list == null ? List.of() : list;
     }
 
-    private record JdbcInfo(String host, String port, String database) {
+    public static class BackupPayload {
+        public String generatedAt;
+        public List<Aluno> alunos;
+        public List<Escola> escolas;
+        public List<BackupPagamento> pagamentos;
+        public List<ComissaoFormatura> comissoes;
+        public List<Demanda> demandas;
+        public List<BackupObservacao> observacoes;
+    }
+
+    public static class BackupPagamento {
+        public Long id;
+        public Long alunoId;
+        public String nomeAluno;
+        public Double valor;
+        public Integer numeroParcela;
+        public LocalDateTime dataPagamento;
+        public String descricao;
+    }
+
+    public static class BackupObservacao {
+        public Long id;
+        public Long alunoId;
+        public String texto;
+        public LocalDateTime dataCriacao;
     }
 }

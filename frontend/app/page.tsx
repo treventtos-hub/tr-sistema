@@ -276,7 +276,7 @@ export default function Home() {
     { id: "escolas" as ViewMode, label: "Turmas/Eventos", helper: "Escolas, turmas e valores", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
     { id: "financeiro" as ViewMode, label: "Financeiro", helper: "Pagamentos, resumo e recibos", action: () => { setView("financeiro"); listarTodos(); listarEscolas(); } },
     { id: "tarefas" as ViewMode, label: "Tarefas", helper: "Rotinas internas", action: () => setView("tarefas") },
-    { id: "usuarios" as ViewMode, label: "UsuÃ¡rios e permissÃµes", helper: "Acessos", action: () => setView("usuarios") }
+    { id: "usuarios" as ViewMode, label: "Usuários e permissões", helper: "Acessos", action: () => setView("usuarios") }
   ];
   const titulosView: Record<ViewMode, { label: string; helper: string }> = {
     menu: { label: "Painel inicial", helper: "Visao geral do sistema antigo dentro do novo layout." },
@@ -325,7 +325,7 @@ export default function Home() {
     const response = await fetch(input, { ...init, headers });
     if (response.status === 401) {
       sair();
-      alert("Sua sessÃ£o expirou. FaÃ§a login novamente.");
+      alert("Sua sessão expirou. Faça login novamente.");
     }
     return response;
   }
@@ -376,32 +376,33 @@ export default function Home() {
   }
 
   async function executarBackup() {
-    const data = new Date();
-    const timestamp = data.toISOString().replace(/[:.]/g, "-");
-    const conteudo = [
-      "# Backup local/manual - TR Sistema",
-      "",
-      "1) Abra o PowerShell na pasta backend do projeto.",
-      "2) Execute o script abaixo para gerar o backup:",
-      "",
-      "powershell -ExecutionPolicy Bypass -File .\\scripts\\backup-trcrm.ps1",
-      "",
-      "Observacao:",
-      "- O backup e gerado no servidor/ambiente onde o script for executado.",
-      "- Ajuste credenciais/variaveis conforme seu ambiente.",
-      "",
-      `Gerado em: ${data.toLocaleString("pt-BR")}`
-    ].join("\n");
+    if (!infraOnline) {
+      alert("Servidor ou banco offline. Nao foi possivel gerar backup.");
+      return;
+    }
 
-    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `backup-local-tr-sistema-${timestamp}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+    try {
+      const response = await apiFetch(`${apiUrl}/backup/export`);
+      if (!response.ok) {
+        const erro = await response.text();
+        throw new Error(erro || "Falha ao gerar backup.");
+      }
+
+      const blob = await response.blob();
+      const data = new Date();
+      const timestamp = data.toISOString().replace(/[:.]/g, "-");
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `trcrm-backup-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      const mensagem = error instanceof Error ? error.message : "Falha ao gerar backup.";
+      alert(mensagem);
+    }
   }
 
   function alunoEstaInadimplente(aluno: Aluno) {
@@ -432,11 +433,11 @@ export default function Home() {
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".dump,.backup,.sql";
+    input.accept = ".json";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
+        const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
       if (!confirmar) return;
 
       try {
@@ -500,13 +501,13 @@ export default function Home() {
     const nome = novoUsuarioForm.nome.trim();
     const email = novoUsuarioForm.email.trim();
     if (!nome || !email) {
-      alert("Informe nome e e-mail do usuÃ¡rio.");
+      alert("Informe nome e e-mail do usuário.");
       return;
     }
 
     const existe = usuariosCadastrados.some((usuario) => usuario.email.toLowerCase() === email.toLowerCase());
     if (existe) {
-      alert("JÃ¡ existe um usuÃ¡rio com este e-mail.");
+      alert("Já existe um usuário com este e-mail.");
       return;
     }
 
@@ -518,7 +519,7 @@ export default function Home() {
     };
     setUsuariosCadastrados((usuarios) => [novoUsuario, ...usuarios]);
     setNovoUsuarioForm({ nome: "", email: "", perfil: "Administrador" });
-    alert("UsuÃ¡rio cadastrado no mÃ³dulo.");
+    alert("Usuário cadastrado no módulo.");
   }
 
   async function salvarDemanda() {
@@ -529,17 +530,17 @@ export default function Home() {
 
     const titulo = novaDemandaForm.titulo.trim();
     if (!titulo) {
-      alert("Informe a descriÃ§Ã£o da demanda.");
+      alert("Informe a descrição da demanda.");
       return;
     }
     if (!novaDemandaForm.responsavelId) {
-      alert("Selecione um responsÃ¡vel cadastrado.");
+      alert("Selecione um responsável cadastrado.");
       return;
     }
 
     const responsavel = usuariosCadastrados.find((usuario) => usuario.id.toString() === novaDemandaForm.responsavelId);
     if (!responsavel) {
-      alert("ResponsÃ¡vel nÃ£o encontrado.");
+      alert("Responsável não encontrado.");
       return;
     }
 
@@ -1148,7 +1149,7 @@ export default function Home() {
     const parcelaTexto = pagamentoRecibo.numeroParcela ? `Parcela ${pagamentoRecibo.numeroParcela}` : "Parcela nao informada";
     const whatsappRecibo = linkWhatsApp(
       alunoRecibo.telefone,
-      `OlÃ¡, ${alunoRecibo.nomeResponsavel || ""}. Segue o recibo de pagamento do(a) aluno(a) ${alunoRecibo.nome}, no valor de ${moeda(pagamentoRecibo.valor)}, referente a ${parcelaTexto}.`
+      `Olá, ${alunoRecibo.nomeResponsavel || ""}. Segue o recibo de pagamento do(a) aluno(a) ${alunoRecibo.nome}, no valor de ${moeda(pagamentoRecibo.valor)}, referente a ${parcelaTexto}.`
     );
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1368,7 +1369,7 @@ export default function Home() {
         <div className="grid gap-5 xl:grid-cols-4">
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{moeda(financeiroResumo.contratado)}</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{Number(financeiroResumo.contratado || 0).toLocaleString("pt-BR")}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
@@ -1392,7 +1393,7 @@ export default function Home() {
                 <div key={demanda.titulo} className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="text-xl font-semibold text-slate-950">{demanda.titulo}</p>
-                    <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} Â· {demanda.departamento}</p>
+                    <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
@@ -1446,7 +1447,7 @@ export default function Home() {
         <div className="grid gap-5 xl:grid-cols-4">
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{moeda(financeiroResumo.contratado)}</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{Number(financeiroResumo.contratado || 0).toLocaleString("pt-BR")}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
@@ -1493,14 +1494,14 @@ export default function Home() {
 
                   {demandaSelecionadaId === demanda.id && (
                     <div className="mt-4 border-t border-slate-200 pt-4" onClick={(e) => e.stopPropagation()}>
-                      <p className="text-sm font-semibold text-slate-700">ComentÃ¡rios</p>
+                      <p className="text-sm font-semibold text-slate-700">Comentários</p>
                       <div className="mt-2 space-y-2 text-sm text-[#08265f]">
                         {demanda.comentarios.map((comentario, index) => (
                           <p key={`${demanda.id}-${index}`} className="rounded-xl bg-white px-4 py-3">{comentario}</p>
                         ))}
                       </div>
                       <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentÃ¡rio" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentário" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
                         <button type="button" onClick={adicionarComentarioDemanda} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Comentar</button>
                       </div>
                     </div>
@@ -2086,7 +2087,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-700">Conta de pagamento</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">{alunoSelecionado.nome}</h2>
-              <p className="mt-1 text-sm text-slate-600">{alunoSelecionado.nomeResponsavel || "-"} Â· {alunoSelecionado.escola || "-"}</p>
+              <p className="mt-1 text-sm text-slate-600">{alunoSelecionado.nomeResponsavel || "-"} · {alunoSelecionado.escola || "-"}</p>
             </div>
             <button type="button" onClick={() => setAlunoSelecionado(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Fechar</button>
           </div>
@@ -2231,7 +2232,7 @@ export default function Home() {
                   <th className="px-5 py-4 font-semibold">Valor</th>
                   <th className="px-5 py-4 font-semibold">Comprovante</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">AÃ§Ãµes</th>
+                  <th className="px-5 py-4 font-semibold">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -2290,7 +2291,7 @@ export default function Home() {
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold text-slate-950">Criar demanda</h2>
           <div className="mt-6 space-y-4">
-            <input type="text" placeholder="DescriÃ§Ã£o da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="Descrição da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <select value={novaDemandaForm.aluno} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Aluno vinculado</option>
               {alunos.map((aluno) => (
@@ -2306,7 +2307,7 @@ export default function Home() {
               <option value="Administracao">Administracao</option>
             </select>
             <select value={novaDemandaForm.responsavelId} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, responsavelId: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="">ResponsÃ¡vel (usuÃ¡rio cadastrado)</option>
+              <option value="">Responsável (usuário cadastrado)</option>
               {usuariosCadastrados.map((usuario) => (
                 <option key={usuario.id} value={usuario.id}>{usuario.nome}</option>
               ))}
@@ -2316,10 +2317,10 @@ export default function Home() {
               <option value="alta">alta</option>
               <option value="urgente">urgente</option>
             </select>
-            <textarea placeholder="ComentÃ¡rio inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <textarea placeholder="Comentário inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <button type="button" onClick={salvarDemanda} disabled={!infraOnline || usuariosCadastrados.length === 0} className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-lg font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar demanda</button>
             {usuariosCadastrados.length === 0 && (
-              <p className="text-sm text-amber-700">Cadastre ao menos um usuÃ¡rio para selecionar o responsÃ¡vel da tarefa.</p>
+              <p className="text-sm text-amber-700">Cadastre ao menos um usuário para selecionar o responsável da tarefa.</p>
             )}
           </div>
         </div>
@@ -2345,11 +2346,11 @@ export default function Home() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-2xl font-semibold text-slate-950">{demanda.titulo}</h3>
-                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno} Â· {demanda.departamento}</p>
+                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
                     <div className="mt-5 space-y-2 text-lg text-[#08265f]">
-                      <p>ResponsÃ¡vel: {demanda.responsavel}</p>
+                      <p>Responsável: {demanda.responsavel}</p>
                       <p>Prazo: {demanda.prazo}</p>
-                      <p>ComentÃ¡rios: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
+                      <p>Comentários: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
                       <p>Anexos: {demanda.anexos.length ? demanda.anexos.join(" | ") : "-"}</p>
                     </div>
                   </div>
@@ -2572,7 +2573,7 @@ export default function Home() {
                   <th className="px-5 py-4 font-medium">Kit</th>
                   <th className="px-5 py-4 font-medium">Replica</th>
                   <th className="px-5 py-4 font-medium">Homenagem</th>
-                  <th className="px-5 py-4 font-medium">AÃ§Ãµes</th>
+                  <th className="px-5 py-4 font-medium">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -2619,8 +2620,8 @@ export default function Home() {
           <div className="mt-4 space-y-3">
             <input type="text" placeholder="Nome" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <input type="tel" placeholder="Telefone" value={alunoForm.telefone} onChange={(e) => setAlunoForm({ ...alunoForm, telefone: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="text" placeholder="ResponsÃ¡vel" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="tel" placeholder="Telefone do responsÃ¡vel" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="Responsável" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="tel" placeholder="Telefone do responsável" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <select value={alunoForm.escolaId} onChange={(e) => setAlunoForm({ ...alunoForm, escolaId: e.target.value, escola: escolas.find((escola) => escola.id.toString() === e.target.value)?.nomeEscola || "" })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Selecione a escola</option>
               {escolas.map((escola) => (
@@ -2695,7 +2696,7 @@ export default function Home() {
           <h2 className="text-2xl font-semibold text-slate-950">Base de alunos</h2>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <input type="text" placeholder="Buscar por nome, CPF, e-mail ou responsÃ¡vel" value={search.nome} onChange={(e) => setSearch({ ...search, nome: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="Buscar por nome, CPF, e-mail ou responsável" value={search.nome} onChange={(e) => setSearch({ ...search, nome: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <select value={alunoEscolaFiltro} onChange={(e) => setAlunoEscolaFiltro(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Todas as turmas</option>
               {escolas.map((escola) => (
@@ -2710,9 +2711,9 @@ export default function Home() {
                 <tr>
                   <th className="px-5 py-4 font-semibold">Aluno</th>
                   <th className="px-5 py-4 font-semibold">Turma</th>
-                  <th className="px-5 py-4 font-semibold">ResponsÃ¡vel</th>
+                  <th className="px-5 py-4 font-semibold">Responsável</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">HistÃ³rico</th>
+                  <th className="px-5 py-4 font-semibold">Histórico</th>
                 </tr>
               </thead>
               <tbody>
@@ -2840,10 +2841,10 @@ export default function Home() {
               <option>Eventos</option>
             </select>
             <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-[#08265f]">
-              <span className="rounded-lg bg-white px-3 py-2">UsuÃ¡rios</span>
-              <span className="rounded-lg bg-white px-3 py-2">PermissÃµes</span>
+              <span className="rounded-lg bg-white px-3 py-2">Usuários</span>
+              <span className="rounded-lg bg-white px-3 py-2">Permissões</span>
               <span className="rounded-lg bg-white px-3 py-2">Departamentos</span>
-              <span className="rounded-lg bg-white px-3 py-2">ConfiguraÃ§Ãµes</span>
+              <span className="rounded-lg bg-white px-3 py-2">Configurações</span>
             </div>
           </div>
         </aside>

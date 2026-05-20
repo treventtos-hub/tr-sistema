@@ -78,6 +78,12 @@ type Demanda = {
   status: string;
 };
 
+type HealthStatus = {
+  serverOnline: boolean;
+  databaseOnline: boolean;
+  checked: boolean;
+};
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
 export default function Home() {
@@ -147,6 +153,12 @@ export default function Home() {
   const [financeiroBuscaRealizada, setFinanceiroBuscaRealizada] = useState(false);
   const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
   const [comentarioDemanda, setComentarioDemanda] = useState("");
+  const [demandaRemovida, setDemandaRemovida] = useState<Demanda | null>(null);
+  const [healthStatus, setHealthStatus] = useState<HealthStatus>({
+    serverOnline: false,
+    databaseOnline: false,
+    checked: false
+  });
   const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([
     {
       id: 1,
@@ -258,7 +270,7 @@ export default function Home() {
     return demandasInternas.map((demanda, index) => ({
       ...demanda,
       aluno: demanda.aluno || alunos[index]?.nome || alunos[0]?.nome || "Aluno"
-    }));
+    })).filter((demanda) => demanda.status !== "concluida");
   }, [alunos, demandasInternas]);
   const parcelasFinanceiro = useMemo(() => {
     return alunos.map((aluno) => {
@@ -294,6 +306,19 @@ export default function Home() {
     usuarios: { label: "Usuarios e permissoes", helper: "Controle visual de acessos para completar o menu do sistema interno." }
   };
   const currentNav = titulosView[view];
+  const infraOnline = healthStatus.serverOnline && healthStatus.databaseOnline;
+  const totalTarefasAbertas = demandasInternas.filter((demanda) => demanda.status !== "concluida").length;
+  const totalUsuarios = 0;
+  const dataPainel = useMemo(
+    () =>
+      new Date().toLocaleDateString("pt-BR", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric"
+      }).replace(/\b\w/g, (letra) => letra.toUpperCase()),
+    []
+  );
 
   function moeda(valor?: number | string) {
     const numero = Number(valor || 0);
@@ -367,14 +392,39 @@ export default function Home() {
     setPagamentosFinanceiro([]);
   }
 
+  async function executarBackup() {
+    alert("Backup local/manual. Execute no servidor: backend/scripts/backup-trcrm.ps1");
+  }
+
   function alunoEstaInadimplente(aluno: Aluno) {
     return (aluno.status || "").toLowerCase() === "inadimplente";
   }
 
   function atualizarStatusDemanda(id: number, status: string) {
-    setDemandasInternas((demandas) =>
-      demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda))
-    );
+    setDemandasInternas((demandas) => {
+      if (status === "concluida") {
+        setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
+        return demandas.filter((demanda) => demanda.id !== id);
+      }
+      return demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda));
+    });
+  }
+
+  function removerDemanda(id: number) {
+    const confirmar = window.confirm("Deseja apagar esta tarefa?");
+    if (!confirmar) return;
+    setDemandasInternas((demandas) => {
+      const alvo = demandas.find((demanda) => demanda.id === id) || null;
+      setDemandaRemovida(alvo);
+      return demandas.filter((demanda) => demanda.id !== id);
+    });
+    setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
+  }
+
+  function desfazerRemocaoDemanda() {
+    if (!demandaRemovida) return;
+    setDemandasInternas((demandas) => [demandaRemovida, ...demandas]);
+    setDemandaRemovida(null);
   }
 
   function adicionarComentarioDemanda() {
@@ -449,6 +499,11 @@ export default function Home() {
   }
 
   async function salvarAluno() {
+    if (!infraOnline) {
+      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
+      return;
+    }
+
     if (!escolaSelecionada) {
       alert("Cadastre e selecione uma escola antes de cadastrar o aluno.");
       return;
@@ -492,6 +547,11 @@ export default function Home() {
   }
 
   async function salvarEscola() {
+    if (!infraOnline) {
+      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
+      return;
+    }
+
     if (!escolaForm.nomeEscola) {
       alert("Informe o nome da escola.");
       return;
@@ -564,10 +624,42 @@ export default function Home() {
     setEscolas(await response.json());
   }
 
+  async function carregarSaudeInfra() {
+    try {
+      const response = await fetch(`${apiUrl}/health`);
+      if (!response.ok) {
+        setHealthStatus({ serverOnline: false, databaseOnline: false, checked: true });
+        return;
+      }
+
+      const data = await response.json();
+      setHealthStatus({
+        serverOnline: Boolean(data.serverOnline),
+        databaseOnline: Boolean(data.databaseOnline),
+        checked: true
+      });
+    } catch {
+      setHealthStatus({ serverOnline: false, databaseOnline: false, checked: true });
+    }
+  }
+
   useEffect(() => {
     if (!authHeader) return;
+
     listarTodos();
     listarEscolas();
+    const initialHealthCheck = window.setTimeout(() => {
+      carregarSaudeInfra();
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      carregarSaudeInfra();
+    }, 30000);
+
+    return () => {
+      window.clearTimeout(initialHealthCheck);
+      window.clearInterval(interval);
+    };
   }, [authHeader]);
 
   async function buscarAlunoFinanceiro() {
@@ -724,6 +816,11 @@ export default function Home() {
   }
 
   async function salvarComissao() {
+    if (!infraOnline) {
+      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
+      return;
+    }
+
     if (!comissaoForm.escolaId || !comissaoForm.alunoId) {
       alert("Selecione a escola e o aluno da comissao.");
       return;
@@ -825,6 +922,11 @@ export default function Home() {
   }
 
   async function registrarPagamento() {
+    if (!infraOnline) {
+      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
+      return;
+    }
+
     if (!pagamento.valor || !pagamento.alunoId) {
       alert("Preencha o valor do pagamento.");
       return;
@@ -1832,7 +1934,7 @@ export default function Home() {
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={registrarPagamento} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Confirmar pagamento</button>
+            <button type="button" onClick={registrarPagamento} disabled={!infraOnline} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Confirmar pagamento</button>
             <button type="button" onClick={() => abrirResumoFinanceiro(alunoSelecionado)} className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Gerar resumo financeiro</button>
             <button type="button" onClick={() => abrirRecibo(ultimoPagamento, alunoSelecionado)} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Gerar recibo</button>
           </div>
@@ -1997,30 +2099,7 @@ export default function Home() {
   }
 
   function tarefasView() {
-    const demandas = [
-      {
-        titulo: "Aluno pediu segunda via do contrato",
-        aluno: alunos[0]?.nome || "Aluno",
-        departamento: "Contratos",
-        responsavel: "Carla Admin",
-        prazo: "2026-05-22",
-        comentarios: "Gerar segunda via e enviar por e-mail.",
-        anexos: "-",
-        prioridade: "media",
-        status: "aberta"
-      },
-      {
-        titulo: "Aluno enviou comprovante",
-        aluno: alunos[1]?.nome || alunos[0]?.nome || "Aluno",
-        departamento: "Financeiro",
-        responsavel: "Ana Financeiro",
-        prazo: "2026-05-20",
-        comentarios: "Conferir valor parcial recebido.",
-        anexos: "entrada-rafael.jpg",
-        prioridade: "alta",
-        status: "em andamento"
-      }
-    ];
+    const demandas = demandasInternas.filter((demanda) => demanda.status !== "concluida");
     const prioridadeClasse: Record<string, string> = {
       media: "bg-sky-100 text-sky-800",
       alta: "bg-amber-100 text-amber-800",
@@ -2072,7 +2151,7 @@ export default function Home() {
 
           <div className="mt-5 space-y-4">
             {demandas.map((demanda) => (
-              <div key={demanda.titulo} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <div key={demanda.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h3 className="text-2xl font-semibold text-slate-950">{demanda.titulo}</h3>
@@ -2080,8 +2159,8 @@ export default function Home() {
                     <div className="mt-5 space-y-2 text-lg text-[#08265f]">
                       <p>Responsável: {demanda.responsavel}</p>
                       <p>Prazo: {demanda.prazo}</p>
-                      <p>Comentários: {demanda.comentarios}</p>
-                      <p>Anexos: {demanda.anexos}</p>
+                      <p>Comentários: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
+                      <p>Anexos: {demanda.anexos.length ? demanda.anexos.join(" | ") : "-"}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -2092,6 +2171,9 @@ export default function Home() {
                       <option value="aguardando">aguardando</option>
                       <option value="concluida">concluida</option>
                     </select>
+                    <button type="button" onClick={() => removerDemanda(demanda.id)} className="rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50">
+                      Apagar tarefa
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2174,7 +2256,7 @@ export default function Home() {
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <button type="button" onClick={salvarEscola} className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">{escolaEditando ? "Atualizar escola" : "Salvar escola"}</button>
+          <button type="button" onClick={salvarEscola} disabled={!infraOnline} className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">{escolaEditando ? "Atualizar escola" : "Salvar escola"}</button>
           {escolaEditando && (
             <button type="button" onClick={resetEscolaForm} className="rounded-3xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
           )}
@@ -2206,7 +2288,7 @@ export default function Home() {
                 ))}
               </select>
               <input type="number" step="0.01" placeholder="Desconto em R$" value={comissaoForm.desconto} onChange={(e) => setComissaoForm({ ...comissaoForm, desconto: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <button type="button" onClick={salvarComissao} disabled={!comissaoForm.escolaId || !comissaoForm.alunoId} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Adicionar aluno</button>
+              <button type="button" onClick={salvarComissao} disabled={!comissaoForm.escolaId || !comissaoForm.alunoId || !infraOnline} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Adicionar aluno</button>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-3">
@@ -2403,7 +2485,7 @@ export default function Home() {
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
-            <button type="button" onClick={salvarAluno} disabled={!escolaSelecionada} className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{alunoEditando ? "Atualizar aluno" : "Salvar aluno"}</button>
+            <button type="button" onClick={salvarAluno} disabled={!escolaSelecionada || !infraOnline} className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{alunoEditando ? "Atualizar aluno" : "Salvar aluno"}</button>
             {alunoEditando && (
               <button type="button" onClick={resetAlunoForm} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
             )}
@@ -2569,13 +2651,32 @@ export default function Home() {
 
         <section className="min-w-0 bg-slate-100 p-4 sm:p-6">
           <header className="border-b border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">Administração</p>
-                <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
-                <button type="button" onClick={sair} className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#08265f] transition hover:bg-slate-50">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${healthStatus.checked ? (healthStatus.serverOnline ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700") : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                  <span className={`h-2.5 w-2.5 rounded-full ${healthStatus.checked ? (healthStatus.serverOnline ? "bg-emerald-600" : "bg-rose-600") : "bg-slate-400"}`} />
+                  {healthStatus.checked ? (healthStatus.serverOnline ? "Servidor online" : "Servidor offline") : "Servidor verificando"}
+                </div>
+                <div className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${healthStatus.checked ? (healthStatus.databaseOnline ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700") : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                  <span className={`h-2.5 w-2.5 rounded-full ${healthStatus.checked ? (healthStatus.databaseOnline ? "bg-emerald-600" : "bg-rose-600") : "bg-slate-400"}`} />
+                  {healthStatus.checked ? (healthStatus.databaseOnline ? "Banco online" : "Banco offline") : "Banco verificando"}
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-900">
+                  {dataPainel}
+                </div>
+                <button type="button" onClick={executarBackup} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                  Backup local
+                </button>
+                <button type="button" onClick={sair} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
                   Sair
                 </button>
+              </div>
+              {!infraOnline && healthStatus.checked && (
+                <p className="text-sm font-semibold text-rose-700">Salvamento bloqueado ate servidor e banco ficarem online.</p>
+              )}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">Administracao</p>
+                <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
               </div>
               <div className="grid gap-3 sm:grid-cols-4">
                 <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
@@ -2588,11 +2689,11 @@ export default function Home() {
                 </div>
                 <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Tarefas</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">3</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{totalTarefasAbertas}</p>
                 </div>
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Usuários</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">3</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Usuarios</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{totalUsuarios}</p>
                 </div>
               </div>
             </div>
@@ -2610,6 +2711,22 @@ export default function Home() {
           </div>
         </section>
       </main>
+      {demandaRemovida && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+          <p className="text-sm font-semibold text-slate-900">Tarefa apagada.</p>
+          <div className="mt-3 flex items-center gap-2">
+            <button type="button" onClick={desfazerRemocaoDemanda} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800">
+              Desfazer
+            </button>
+            <button type="button" onClick={() => setDemandaRemovida(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+
+

@@ -2,7 +2,6 @@ package com.tr.backend.controller;
 
 import com.tr.backend.model.Aluno;
 import com.tr.backend.repository.AlunoRepository;
-import com.tr.backend.repository.ObservacaoAlunoRepository;
 import com.tr.backend.repository.PagamentoRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.http.HttpStatus;
@@ -18,12 +17,10 @@ public class AlunoController {
 
     private final AlunoRepository repository;
     private final PagamentoRepository pagamentoRepository;
-    private final ObservacaoAlunoRepository observacaoAlunoRepository;
 
-    public AlunoController(AlunoRepository repository, PagamentoRepository pagamentoRepository, ObservacaoAlunoRepository observacaoAlunoRepository) {
+    public AlunoController(AlunoRepository repository, PagamentoRepository pagamentoRepository) {
         this.repository = repository;
         this.pagamentoRepository = pagamentoRepository;
-        this.observacaoAlunoRepository = observacaoAlunoRepository;
     }
 
     @GetMapping
@@ -32,7 +29,7 @@ public class AlunoController {
             @RequestParam(required = false) String responsavel,
             @RequestParam(required = false) String telefone,
             @RequestParam(required = false) String escola) {
-
+        
         if (nome != null && !nome.isEmpty()) {
             return repository.findByNomeContainingIgnoreCase(nome);
         }
@@ -93,7 +90,6 @@ public class AlunoController {
         }
 
         pagamentoRepository.deleteByAlunoId(id);
-        observacaoAlunoRepository.deleteByAlunoId(id);
         repository.deleteById(id);
     }
 }

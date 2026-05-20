@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "financeiro" | "tarefas" | "usuarios";
 
@@ -82,6 +82,11 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
 export default function Home() {
   const [view, setView] = useState<ViewMode>("menu");
+  const [authChecked] = useState(true);
+  const [authHeader, setAuthHeader] = useState(() => (typeof window === "undefined" ? "" : window.localStorage.getItem("trAuthHeader") || ""));
+  const [loginForm, setLoginForm] = useState({ email: "", senha: "" });
+  const [loginErro, setLoginErro] = useState("");
+  const [loginCarregando, setLoginCarregando] = useState(false);
   const [alunoForm, setAlunoForm] = useState({
     nome: "",
     nomeResponsavel: "",
@@ -177,11 +182,6 @@ export default function Home() {
       status: "aberta"
     }
   ]);
-
-  useEffect(() => {
-    listarTodos();
-    listarEscolas();
-  }, []);
 
   const indicadores = useMemo(() => {
     return {
@@ -304,6 +304,69 @@ export default function Home() {
     return valor ? parseFloat(valor) : 0;
   }
 
+  function gerarAuthHeader(email: string, senha: string) {
+    return `Basic ${window.btoa(`${email.trim()}:${senha}`)}`;
+  }
+
+  async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+    const headers = new Headers(init.headers || {});
+    if (authHeader) {
+      headers.set("Authorization", authHeader);
+    }
+
+    const response = await fetch(input, { ...init, headers });
+    if (response.status === 401) {
+      sair();
+      alert("Sua sessão expirou. Faça login novamente.");
+    }
+    return response;
+  }
+
+  async function entrar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginErro("");
+
+    if (!loginForm.email.trim() || !loginForm.senha) {
+      setLoginErro("Informe e-mail e senha.");
+      return;
+    }
+
+    setLoginCarregando(true);
+    try {
+      const response = await fetch(`${apiUrl}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginForm.email, senha: loginForm.senha })
+      });
+
+      if (!response.ok) {
+        setLoginErro(response.status === 503 ? "Login do sistema nao configurado no backend." : "Login ou senha invalido.");
+        return;
+      }
+
+      const header = gerarAuthHeader(loginForm.email, loginForm.senha);
+      window.localStorage.setItem("trAuthHeader", header);
+      setAuthHeader(header);
+      setLoginForm({ email: "", senha: "" });
+    } catch {
+      setLoginErro("Nao foi possivel conectar ao servidor da API.");
+    } finally {
+      setLoginCarregando(false);
+    }
+  }
+
+  function sair() {
+    window.localStorage.removeItem("trAuthHeader");
+    setAuthHeader("");
+    setAlunos([]);
+    setEscolas([]);
+    setAlunoSelecionado(null);
+    setAlunoDetalhe(null);
+    setAlunoFinanceiro(null);
+    setPagamentos([]);
+    setPagamentosFinanceiro([]);
+  }
+
   function alunoEstaInadimplente(aluno: Aluno) {
     return (aluno.status || "").toLowerCase() === "inadimplente";
   }
@@ -413,7 +476,7 @@ export default function Home() {
     };
     delete (dataToSave as Record<string, unknown>).escolaId;
 
-    const response = await fetch(alunoEditando ? `${apiUrl}/alunos/${alunoEditando.id}` : `${apiUrl}/alunos`, {
+    const response = await apiFetch(alunoEditando ? `${apiUrl}/alunos/${alunoEditando.id}` : `${apiUrl}/alunos`, {
       method: alunoEditando ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(dataToSave)
@@ -450,7 +513,7 @@ export default function Home() {
       valorPlacaHomenagem: parseMoney(escolaForm.valorPlacaHomenagem)
     };
 
-    const response = await fetch(escolaEditando ? `${apiUrl}/escolas/${escolaEditando.id}` : `${apiUrl}/escolas`, {
+    const response = await apiFetch(escolaEditando ? `${apiUrl}/escolas/${escolaEditando.id}` : `${apiUrl}/escolas`, {
       method: escolaEditando ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(dataToSave)
@@ -474,13 +537,13 @@ export default function Home() {
       alert("Preencha nome do aluno, responsavel ou escola para pesquisar.");
       return;
     }
-    const response = await fetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
+    const response = await apiFetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
     setAlunos(await response.json());
     setResultadoBuscaVisivel(true);
   }
 
   async function listarTodos() {
-    const response = await fetch(`${apiUrl}/alunos`);
+    const response = await apiFetch(`${apiUrl}/alunos`);
     setAlunos(await response.json());
   }
 
@@ -497,9 +560,15 @@ export default function Home() {
   }
 
   async function listarEscolas() {
-    const response = await fetch(`${apiUrl}/escolas`);
+    const response = await apiFetch(`${apiUrl}/escolas`);
     setEscolas(await response.json());
   }
+
+  useEffect(() => {
+    if (!authHeader) return;
+    listarTodos();
+    listarEscolas();
+  }, [authHeader]);
 
   async function buscarAlunoFinanceiro() {
     const params = new URLSearchParams();
@@ -514,7 +583,7 @@ export default function Home() {
 
     setFinanceiroBuscaRealizada(true);
     try {
-      const response = await fetch(`${apiUrl}/alunos?${params.toString()}`);
+      const response = await apiFetch(`${apiUrl}/alunos?${params.toString()}`);
       if (response.ok) {
         setFinanceiroResultados(await response.json());
         return;
@@ -547,7 +616,7 @@ export default function Home() {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
+    const response = await apiFetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
     if (!response.ok) {
       alert("Nao foi possivel consultar a comissao desta escola.");
       return;
@@ -560,7 +629,7 @@ export default function Home() {
     setAlunoFinanceiro(null);
     setComissaoAlunoDetalhe(null);
 
-    const response = await fetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
+    const response = await apiFetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
     if (!response.ok) return;
 
     const comissoes = await response.json();
@@ -587,7 +656,7 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "smooth" });
 
     try {
-      const response = await fetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+      const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
       if (!response.ok) {
         alert("Nao foi possivel carregar os pagamentos deste aluno. O resumo do contrato foi aberto mesmo assim.");
         return;
@@ -660,7 +729,7 @@ export default function Home() {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/comissao-formatura`, {
+    const response = await apiFetch(`${apiUrl}/comissao-formatura`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -682,7 +751,7 @@ export default function Home() {
   async function excluirAluno(alunoId: number) {
     if (!window.confirm("Deseja realmente excluir este cadastro?")) return;
 
-    const response = await fetch(`${apiUrl}/alunos/${alunoId}`, { method: "DELETE" });
+    const response = await apiFetch(`${apiUrl}/alunos/${alunoId}`, { method: "DELETE" });
     if (!response.ok) {
       alert("Nao foi possivel excluir este cadastro.");
       return;
@@ -707,7 +776,7 @@ export default function Home() {
   async function excluirEscola(escolaId: number) {
     if (!window.confirm("Deseja realmente excluir esta escola?")) return;
 
-    const response = await fetch(`${apiUrl}/escolas/${escolaId}`, { method: "DELETE" });
+    const response = await apiFetch(`${apiUrl}/escolas/${escolaId}`, { method: "DELETE" });
     if (!response.ok) {
       alert("Nao foi possivel excluir esta escola.");
       return;
@@ -734,12 +803,12 @@ export default function Home() {
   }
 
   async function carregarPagamentos(alunoId: number) {
-    const response = await fetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
+    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
     setPagamentos(await response.json());
   }
 
   async function abrirUltimoReciboAluno(aluno: Aluno) {
-    const response = await fetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
     if (!response.ok) {
       alert("Nao foi possivel carregar os pagamentos deste aluno.");
       return;
@@ -767,7 +836,7 @@ export default function Home() {
       numeroParcela: numeroParcela ? parseInt(numeroParcela) : 0,
       descricao: ""
     };
-    const response = await fetch(`${apiUrl}/pagamentos`, {
+    const response = await apiFetch(`${apiUrl}/pagamentos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data)
@@ -785,7 +854,7 @@ export default function Home() {
 
     if (alunoSelecionado) {
       carregarPagamentos(alunoSelecionado.id);
-      const alunoResponse = await fetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
+      const alunoResponse = await apiFetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
       const updatedAlunos = await alunoResponse.json();
       const atualizado = updatedAlunos.find((aluno: Aluno) => aluno.id === alunoSelecionado.id) || updatedAlunos[0];
       if (atualizado) setAlunoSelecionado(atualizado);
@@ -2411,6 +2480,53 @@ export default function Home() {
     );
   }
 
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 text-slate-950">
+        <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
+          <p className="text-sm font-semibold uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-black">Carregando sistema</h1>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authHeader) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-8 text-slate-950">
+        <form onSubmit={entrar} className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
+          <p className="text-sm font-semibold uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-black">Sistema interno</h1>
+
+          <div className="mt-8 space-y-4">
+            <input
+              value={loginForm.email}
+              onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
+              className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50 px-5 text-base text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+              placeholder="E-mail"
+              type="email"
+              autoComplete="username"
+            />
+            <input
+              value={loginForm.senha}
+              onChange={(e) => setLoginForm((prev) => ({ ...prev, senha: e.target.value }))}
+              className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50 px-5 text-base text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+              placeholder="Senha"
+              type="password"
+              autoComplete="current-password"
+            />
+          </div>
+
+          {loginErro && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{loginErro}</p>}
+
+          <button type="submit" disabled={loginCarregando} className="mt-6 h-14 w-full rounded-xl bg-[#02071a] px-5 text-base font-semibold text-white transition hover:bg-[#08265f] disabled:cursor-not-allowed disabled:opacity-70">
+            {loginCarregando ? "Entrando..." : "Entrar"}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-slate-950 lg:bg-slate-100">
       <main className="grid min-h-screen lg:grid-cols-[335px_minmax(0,1fr)]">
@@ -2457,6 +2573,9 @@ export default function Home() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">Administração</p>
                 <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
+                <button type="button" onClick={sair} className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#08265f] transition hover:bg-slate-50">
+                  Sair
+                </button>
               </div>
               <div className="grid gap-3 sm:grid-cols-4">
                 <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">

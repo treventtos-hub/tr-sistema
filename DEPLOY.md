@@ -12,26 +12,33 @@ Este projeto esta preparado para rodar em uma VPS com Docker Compose, usando:
 No painel do dominio, crie registros `A` apontando para o IP publico da VPS:
 
 ```txt
-sistema.treventtos.com.br -> 54.232.119.62
-api.treventtos.com.br     -> 54.232.119.62
-www.treventtos.com.br     -> 54.232.119.62
-treventtos.com.br         -> 54.232.119.62
+sistema.treventtos.com.br -> IP_DA_VPS
+api.treventtos.com.br     -> IP_DA_VPS
+www.treventtos.com.br     -> IP_DA_VPS
+treventtos.com.br         -> IP_DA_VPS
 ```
 
 ## Arquivo de ambiente
 
-No servidor, copie `.env.prod.example` para `.env` e troque a senha:
+No servidor, copie `.env.prod.example` para `.env` e configure:
 
 ```bash
 cp .env.prod.example .env
 nano .env
 ```
 
-No `.env`, configure tambem o login do sistema:
+Configure as variáveis no `.env`:
 
 ```txt
-APP_AUTH_USERNAME=treventtos@gmail.com
-APP_AUTH_PASSWORD=sua-senha-do-sistema
+APP_DOMAIN=treventtos.com.br
+ACME_EMAIL=seu-email@treventtos.com.br
+
+POSTGRES_DB=trcrm
+POSTGRES_USER=trcrm
+POSTGRES_PASSWORD=senha-segura-do-banco
+
+APP_AUTH_USERNAME=seu-email@treventtos.com.br
+APP_AUTH_PASSWORD=senha-segura-do-sistema
 ```
 
 ## Subir
@@ -54,7 +61,15 @@ docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
 docker cp $(docker compose -f docker-compose.prod.yml --env-file .env ps -q postgres):/tmp/trcrm.dump ./trcrm.dump
 ```
 
-## Observacao importante
+## Autenticação
 
-O sistema ainda nao tem login/senha. Antes de colocar dados reais de alunos em um link publico,
-o recomendado e adicionar autenticacao.
+O sistema já possui autenticação implementada usando Basic Auth. Use as credenciais configuradas no `.env` para fazer login no frontend.
+
+## Atualizar o sistema
+
+Para atualizar o sistema após mudanças no código:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env pull
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+```

@@ -12,6 +12,7 @@ build/
 .env.local
 backend/.env.local
 backend/scripts/backup-trcrm.local.ps1
+supabase/.temp/
 
 frontend/node_modules/
 frontend/.next/

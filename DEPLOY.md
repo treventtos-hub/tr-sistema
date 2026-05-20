@@ -1,75 +1,97 @@
-# Deploy online
+# Deploy Vercel + Render + Supabase
 
-Este projeto esta preparado para rodar em uma VPS com Docker Compose, usando:
+Este projeto esta preparado para:
 
-- `sistema.treventtos.com.br` para o frontend
-- `api.treventtos.com.br` para a API
-- PostgreSQL em container persistente
-- Caddy para HTTPS automatico
+- Frontend Next.js na Vercel, com root directory `frontend`
+- Backend Spring Boot no Render, com root directory `backend`
+- Banco PostgreSQL no Supabase
 
-## DNS
+## 1. Supabase
 
-No painel do dominio, crie registros `A` apontando para o IP publico da VPS:
+Crie um projeto no Supabase e copie os dados de conexao do banco.
 
-```txt
-sistema.treventtos.com.br -> IP_DA_VPS
-api.treventtos.com.br     -> IP_DA_VPS
-www.treventtos.com.br     -> IP_DA_VPS
-treventtos.com.br         -> IP_DA_VPS
-```
-
-## Arquivo de ambiente
-
-No servidor, copie `.env.prod.example` para `.env` e configure:
-
-```bash
-cp .env.prod.example .env
-nano .env
-```
-
-Configure as variáveis no `.env`:
+Para o Render, use preferencialmente a URL JDBC do pooler em modo Transaction:
 
 ```txt
-APP_DOMAIN=treventtos.com.br
-ACME_EMAIL=seu-email@treventtos.com.br
-
-POSTGRES_DB=trcrm
-POSTGRES_USER=trcrm
-POSTGRES_PASSWORD=senha-segura-do-banco
-
-APP_AUTH_USERNAME=seu-email@treventtos.com.br
-APP_AUTH_PASSWORD=senha-segura-do-sistema
+SPRING_DATASOURCE_URL=jdbc:postgresql://HOST_DO_POOLER:6543/postgres?prepareThreshold=0
+SPRING_DATASOURCE_USERNAME=postgres.PROJECT_REF
+SPRING_DATASOURCE_PASSWORD=SENHA_DO_BANCO
 ```
 
-## Subir
+O parametro `prepareThreshold=0` evita problemas comuns do driver PostgreSQL com pooler em modo Transaction.
+
+## 2. Render Backend
+
+Crie um Web Service no Render apontando para o repositorio.
+
+Configuracao recomendada:
+
+```txt
+Root Directory: backend
+Runtime: Docker
+Health Check Path: /health
+```
+
+Variaveis de ambiente no Render:
+
+```txt
+SPRING_DATASOURCE_URL=jdbc:postgresql://HOST_DO_POOLER:6543/postgres?prepareThreshold=0
+SPRING_DATASOURCE_USERNAME=postgres.PROJECT_REF
+SPRING_DATASOURCE_PASSWORD=SENHA_DO_BANCO
+APP_AUTH_USERNAME=email-de-login
+APP_AUTH_PASSWORD=senha-do-sistema
+```
+
+O Render define `PORT` automaticamente. O backend ja usa essa porta por `server.port=${PORT:8081}`.
+
+Depois do deploy, teste:
+
+```txt
+https://SEU_BACKEND.onrender.com/health
+```
+
+## 3. Vercel Frontend
+
+Importe o mesmo repositorio na Vercel.
+
+Configuracao recomendada:
+
+```txt
+Root Directory: frontend
+Framework Preset: Next.js
+Install Command: npm ci
+Build Command: npm run build
+```
+
+Variavel de ambiente na Vercel:
+
+```txt
+NEXT_PUBLIC_API_URL=https://SEU_BACKEND.onrender.com
+```
+
+Importante: em Next.js, variaveis `NEXT_PUBLIC_*` entram no bundle durante o build. Se trocar a URL da API, faca novo deploy na Vercel.
+
+## 4. Login
+
+O login do sistema usa as variaveis do Render:
+
+```txt
+APP_AUTH_USERNAME
+APP_AUTH_PASSWORD
+```
+
+Use esses mesmos valores na tela de login do frontend.
+
+## 5. Checklist rapido
+
+Antes de publicar:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+cd frontend
+npm run lint
+npm run build
 ```
 
-## Ver logs
+No Render, confirme que `/health` responde.
 
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env logs -f
-```
-
-## Backup do banco no servidor
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
-  pg_dump -U trcrm -d trcrm -Fc -f /tmp/trcrm.dump
-docker cp $(docker compose -f docker-compose.prod.yml --env-file .env ps -q postgres):/tmp/trcrm.dump ./trcrm.dump
-```
-
-## Autenticação
-
-O sistema já possui autenticação implementada usando Basic Auth. Use as credenciais configuradas no `.env` para fazer login no frontend.
-
-## Atualizar o sistema
-
-Para atualizar o sistema após mudanças no código:
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env pull
-docker compose -f docker-compose.prod.yml --env-file .env up -d --build
-```
+Na Vercel, confirme que `NEXT_PUBLIC_API_URL` aponta para a URL final do Render, sem barra no final.

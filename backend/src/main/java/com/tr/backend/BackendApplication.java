@@ -1,5 +1,7 @@
 package com.tr.backend;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.tr.backend.repository.AlunoRepository;
 import com.tr.backend.repository.PagamentoRepository;
 import org.springframework.boot.CommandLineRunner;
@@ -14,6 +16,11 @@ public class BackendApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(BackendApplication.class, args);
+	}
+
+	@Bean
+	ObjectMapper objectMapper() {
+		return JsonMapper.builder().findAndAddModules().build();
 	}
 
 	@Bean

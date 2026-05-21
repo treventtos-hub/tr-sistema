@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/alunos")
@@ -47,6 +48,8 @@ public class AlunoController {
 
     @PostMapping
     public Aluno salvar(@RequestBody Aluno aluno) {
+        validarAluno(aluno);
+
         if (aluno.getValorRestanteContrato() == null) {
             aluno.setValorRestanteContrato(aluno.getValorContrato());
         }
@@ -56,6 +59,8 @@ public class AlunoController {
 
     @PutMapping("/{id}")
     public Aluno atualizar(@PathVariable Long id, @RequestBody Aluno alunoAtualizado) {
+        validarAluno(alunoAtualizado);
+
         Aluno aluno = repository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aluno nao encontrado."));
 
@@ -91,5 +96,27 @@ public class AlunoController {
 
         pagamentoRepository.deleteByAlunoId(id);
         repository.deleteById(id);
+    }
+
+    private void validarAluno(Aluno aluno) {
+        if (aluno == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados do aluno nao enviados.");
+        }
+        if (aluno.getNome() == null || aluno.getNome().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do aluno e obrigatorio.");
+        }
+        if (aluno.getEscola() == null || aluno.getEscola().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Escola do aluno e obrigatoria.");
+        }
+
+        Double valorContrato = Objects.requireNonNullElse(aluno.getValorContrato(), 0d);
+        Double valorRestante = Objects.requireNonNullElse(aluno.getValorRestanteContrato(), valorContrato);
+
+        if (valorContrato < 0 || valorRestante < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valores de contrato nao podem ser negativos.");
+        }
+        if (valorRestante > valorContrato) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valor restante nao pode ser maior que o contrato.");
+        }
     }
 }

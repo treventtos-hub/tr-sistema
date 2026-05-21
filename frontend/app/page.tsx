@@ -72,6 +72,8 @@ type Demanda = {
   departamento: string;
   responsavel: string;
   prazo: string;
+  criadoEm?: string;
+  concluidoEm?: string | null;
   comentarios: string[];
   anexos: string[];
   prioridade: string;
@@ -140,6 +142,7 @@ export default function Home() {
   const [numeroParcela, setNumeroParcela] = useState("");
   const [alunoSelecionado, setAlunoSelecionado] = useState<Aluno | null>(null);
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
+  const [pagamentosSistema, setPagamentosSistema] = useState<Pagamento[]>([]);
   const [ultimoPagamento, setUltimoPagamento] = useState<Pagamento | null>(null);
   const [mostrarComissao, setMostrarComissao] = useState(false);
   const [comissaoForm, setComissaoForm] = useState({ escolaId: "", alunoId: "", desconto: "" });
@@ -171,6 +174,13 @@ export default function Home() {
   const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
   const [comentarioDemanda, setComentarioDemanda] = useState("");
   const [demandaRemovida, setDemandaRemovida] = useState<Demanda | null>(null);
+  const [erroResponsavelDemanda, setErroResponsavelDemanda] = useState(false);
+  const [tarefaBusca, setTarefaBusca] = useState("");
+  const [tarefaFiltroResponsavel, setTarefaFiltroResponsavel] = useState("todos");
+  const [tarefaFiltroPrioridade, setTarefaFiltroPrioridade] = useState("todas");
+  const [tarefaFiltroPrazo, setTarefaFiltroPrazo] = useState("todos");
+  const [tarefaDetalheId, setTarefaDetalheId] = useState<number | null>(null);
+  const [statusParcelaOverride, setStatusParcelaOverride] = useState<Record<number, string>>({});
   const [healthStatus, setHealthStatus] = useState<HealthStatus>({
     serverOnline: false,
     databaseOnline: false,
@@ -257,19 +267,27 @@ export default function Home() {
   }, [alunos, demandasInternas]);
   const parcelasFinanceiro = useMemo(() => {
     return alunos.map((aluno) => {
+      const escolaAluno = escolas.find((escola) => escola.nomeEscola === aluno.escola);
       const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
       const contratado = Number(aluno.valorContrato || 0);
-      const status = restante <= 0 ? "pago" : restante < contratado ? "parcial" : "pendente";
+      const statusCalculado =
+        restante <= 0
+          ? "pago"
+          : restante === contratado && contratado > 0
+            ? "pendente"
+            : alunoEstaInadimplente(aluno)
+              ? "inadimplente"
+              : "parcial";
+      const status = statusParcelaOverride[aluno.id] || statusCalculado;
       return {
         aluno,
         numero: 1,
-        vencimento: "-",
+        prazoFinalQuitacao: escolaAluno?.dataLimiteContrato || "-",
         valor: Number(aluno.valorMensal || restante || contratado || 0),
-        comprovante: status === "pago" ? "Registrado" : "Pendente",
         status
       };
     }).filter((item) => filtroParcela === "todos" || item.status === filtroParcela);
-  }, [alunos, filtroParcela]);
+  }, [alunos, escolas, filtroParcela, statusParcelaOverride]);
   const navItems = [
     { id: "menu" as ViewMode, label: "Painel inicial", helper: "Resumo geral", action: () => setView("menu") },
     { id: "alunos" as ViewMode, label: "Alunos", helper: "Cadastro e consulta", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
@@ -384,8 +402,26 @@ export default function Home() {
     try {
       const response = await apiFetch(`${apiUrl}/backup/export`);
       if (!response.ok) {
-        const erro = await response.text();
-        throw new Error(erro || "Falha ao gerar backup.");
+        // Fallback local quando o backend ainda nao tem /backup/export em producao.
+        const payload = {
+          generatedAt: new Date().toISOString(),
+          alunos,
+          escolas,
+          demandas: demandasInternas
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+        const data = new Date();
+        const timestamp = data.toISOString().replace(/[:.]/g, "-");
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `trcrm-backup-local-${timestamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        alert("Backup local gerado (fallback).");
+        return;
       }
 
       const blob = await response.blob();
@@ -406,22 +442,58 @@ export default function Home() {
   }
 
   function alunoEstaInadimplente(aluno: Aluno) {
-    return (aluno.status || "").toLowerCase() === "inadimplente";
+    const escolaAluno = escolas.find((escola) => escola.nomeEscola === aluno.escola);
+    const inicio = escolaAluno?.mesInicioPagamento;
+    if (!inicio) return false;
+
+    const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
+    if (restante <= 0) return false;
+
+    const agora = new Date();
+    const chaveMesAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, "0")}`;
+    const chaveMesInicio = inicio.length >= 7 ? inicio.slice(0, 7) : inicio;
+    if (chaveMesAtual < chaveMesInicio) return false;
+
+    const pagamentosDoAluno = pagamentosSistema.filter((pagamento) => pagamento.aluno?.id === aluno.id);
+    const jaPagouAlgumaVez = pagamentosDoAluno.length > 0;
+    if (!jaPagouAlgumaVez) return false;
+
+    const pagouNoMes = pagamentosDoAluno.some((pagamento) => {
+      const idAlunoPagamento = pagamento.aluno?.id;
+      if (!idAlunoPagamento || idAlunoPagamento !== aluno.id) return false;
+      if (!pagamento.dataPagamento) return false;
+      const dataPagamento = new Date(pagamento.dataPagamento);
+      const chaveMesPagamento = `${dataPagamento.getFullYear()}-${String(dataPagamento.getMonth() + 1).padStart(2, "0")}`;
+      return chaveMesPagamento === chaveMesAtual;
+    });
+
+    return !pagouNoMes;
   }
 
   async function atualizarStatusDemanda(id: number, status: string) {
+    const atual = demandasInternas.find((demanda) => demanda.id === id);
+    if (!atual) return;
+    const atualizada: Demanda = {
+      ...atual,
+      status,
+      concluidoEm: status === "concluida" ? new Date().toISOString() : null
+    };
+
     try {
-      const response = await apiFetch(`${apiUrl}/demandas/${id}/status`, {
-        method: "PATCH",
+      const response = await apiFetch(`${apiUrl}/demandas/${id}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status })
+        body: JSON.stringify(atualizada)
       });
       if (!response.ok) {
         throw new Error("Falha ao atualizar status.");
       }
-      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda)));
+      const payload = await response.json();
+      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? payload : demanda)));
     } catch {
-      alert("Nao foi possivel atualizar o status da tarefa.");
+      // Fallback local para manter a operacao fluida mesmo sem endpoint disponivel.
+      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? atualizada : demanda)));
+      alert("Status atualizado localmente. A API nao respondeu no momento.");
     }
   }
 
@@ -435,10 +507,26 @@ export default function Home() {
     input.type = "file";
     input.accept = ".json";
     input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-        const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
+      const selectedFile = input.files?.[0];
+      if (!selectedFile) return;
+      const file = selectedFile;
+      const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
       if (!confirmar) return;
+
+      async function restaurarLocalmente() {
+        const texto = await file.text();
+        const payload = JSON.parse(texto) as {
+          alunos?: Aluno[];
+          escolas?: Escola[];
+          demandas?: Demanda[];
+        };
+
+        setAlunos(Array.isArray(payload.alunos) ? payload.alunos : []);
+        setEscolas(Array.isArray(payload.escolas) ? payload.escolas : []);
+        setDemandasInternas(Array.isArray(payload.demandas) ? payload.demandas : []);
+        setView("menu");
+        alert("Restore local aplicado com sucesso.");
+      }
 
       try {
         const formData = new FormData();
@@ -448,14 +536,22 @@ export default function Home() {
           body: formData
         });
         if (!response.ok) {
+          if (response.status === 404) {
+            await restaurarLocalmente();
+            return;
+          }
           const erro = await response.text();
           throw new Error(erro || "Falha ao restaurar backup.");
         }
         await Promise.all([listarTodos(), listarEscolas(), carregarDemandas()]);
         alert("Restore concluido com sucesso.");
       } catch (error) {
-        const mensagem = error instanceof Error ? error.message : "Falha ao restaurar backup.";
-        alert(mensagem);
+        try {
+          await restaurarLocalmente();
+        } catch {
+          const mensagem = error instanceof Error ? error.message : "Falha ao restaurar backup.";
+          alert(mensagem);
+        }
       }
     };
     input.click();
@@ -534,9 +630,11 @@ export default function Home() {
       return;
     }
     if (!novaDemandaForm.responsavelId) {
+      setErroResponsavelDemanda(true);
       alert("Selecione um responsável cadastrado.");
       return;
     }
+    setErroResponsavelDemanda(false);
 
     const responsavel = usuariosCadastrados.find((usuario) => usuario.id.toString() === novaDemandaForm.responsavelId);
     if (!responsavel) {
@@ -550,6 +648,8 @@ export default function Home() {
       departamento: novaDemandaForm.departamento,
       responsavel: responsavel.nome,
       prazo: new Date().toISOString().slice(0, 10),
+      criadoEm: new Date().toISOString(),
+      concluidoEm: null,
       comentarios: novaDemandaForm.comentario.trim() ? [novaDemandaForm.comentario.trim()] : [],
       anexos: [],
       prioridade: novaDemandaForm.prioridade,
@@ -567,6 +667,12 @@ export default function Home() {
       }
       const criada = await response.json();
       setDemandasInternas((demandas) => [criada, ...demandas]);
+      setDepartamentoAtivo("todos");
+      setTarefaBusca("");
+      setTarefaFiltroResponsavel("todos");
+      setTarefaFiltroPrioridade("todas");
+      setTarefaFiltroPrazo("todos");
+      setTarefaDetalheId(criada.id);
       setNovaDemandaForm({
         titulo: "",
         aluno: "",
@@ -602,6 +708,14 @@ export default function Home() {
     } catch {
       alert("Nao foi possivel adicionar o comentario.");
     }
+  }
+
+  function atualizarStatusParcela(alunoId: number, status: string) {
+    setStatusParcelaOverride((prev) => ({ ...prev, [alunoId]: status }));
+  }
+
+  function atualizarStatusAlunoLocal(alunoId: number, status: string) {
+    setAlunos((lista) => lista.map((aluno) => (aluno.id === alunoId ? { ...aluno, status } : aluno)));
   }
 
   function resetAlunoForm() {
@@ -798,6 +912,17 @@ export default function Home() {
     }
   }
 
+  async function carregarPagamentosSistema() {
+    try {
+      const response = await apiFetch(`${apiUrl}/pagamentos`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      setPagamentosSistema(Array.isArray(payload) ? payload : []);
+    } catch {
+      setPagamentosSistema([]);
+    }
+  }
+
   async function carregarSaudeInfra() {
     try {
       const response = await fetch(`${apiUrl}/health`);
@@ -820,18 +945,22 @@ export default function Home() {
   useEffect(() => {
     if (!authHeader) return;
 
-    listarTodos();
-    listarEscolas();
-    carregarDemandas();
+    const bootstrap = window.setTimeout(() => {
+      void listarTodos();
+      void listarEscolas();
+      void carregarDemandas();
+      void carregarPagamentosSistema();
+    }, 0);
     const initialHealthCheck = window.setTimeout(() => {
-      carregarSaudeInfra();
+      void carregarSaudeInfra();
     }, 0);
 
     const interval = window.setInterval(() => {
-      carregarSaudeInfra();
+      void carregarSaudeInfra();
     }, 30000);
 
     return () => {
+      window.clearTimeout(bootstrap);
       window.clearTimeout(initialHealthCheck);
       window.clearInterval(interval);
     };
@@ -1366,11 +1495,7 @@ export default function Home() {
 
     return (
       <section className="space-y-7">
-        <div className="grid gap-5 xl:grid-cols-4">
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{Number(financeiroResumo.contratado || 0).toLocaleString("pt-BR")}</p>
-          </div>
+        <div className="grid gap-5 xl:grid-cols-3">
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
@@ -1397,7 +1522,7 @@ export default function Home() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                    <select value={demanda.status} onChange={() => undefined} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-lg text-slate-950">
+                    <select value={demanda.status} onChange={(e) => atualizarStatusDemanda((demanda as Demanda & { id?: number }).id || 0, e.target.value)} disabled={!((demanda as Demanda & { id?: number }).id)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-lg text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-100">
                       <option value="aberta">aberta</option>
                       <option value="em andamento">em andamento</option>
                       <option value="aguardando">aguardando</option>
@@ -1433,7 +1558,6 @@ export default function Home() {
   }
 
   function menuInicialInterativo() {
-    const inadimplentes = alunos.filter(alunoEstaInadimplente).length;
     const prioridadeClasse: Record<string, string> = {
       baixa: "bg-slate-100 text-slate-700",
       media: "bg-sky-100 text-sky-800",
@@ -1444,25 +1568,6 @@ export default function Home() {
 
     return (
       <section className="space-y-7">
-        <div className="grid gap-5 xl:grid-cols-4">
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Contratado</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{Number(financeiroResumo.contratado || 0).toLocaleString("pt-BR")}</p>
-          </div>
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
-          </div>
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-rose-700">Inadimplentes</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{inadimplentes}</p>
-          </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">Turmas/Eventos</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
-          </div>
-        </div>
-
         <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
           <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-950">Demandas recentes</h2>
@@ -2140,17 +2245,17 @@ export default function Home() {
   function financeiroView() {
     return (
       <section className="space-y-6">
-        <div className="grid gap-5 xl:grid-cols-3">
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Em aberto</p>
+        <div className="grid gap-4 xl:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Em aberto</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
           </div>
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Pagos</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
           </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">Inadimplentes</p>
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Inadimplentes</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{alunos.filter(alunoEstaInadimplente).length}</p>
           </div>
         </div>
@@ -2207,9 +2312,9 @@ export default function Home() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-950">Parcelas e comprovantes</h2>
+          <h2 className="text-2xl font-semibold text-slate-950">Parcelas e contratos</h2>
           <div className="mt-6 flex flex-wrap gap-3">
-            {["todos", "pendente", "pago", "atrasado", "parcial", "cancelado"].map((status) => (
+            {["todos", "pendente", "parcial", "inadimplente", "pago"].map((status) => (
               <button
                 key={status}
                 type="button"
@@ -2226,11 +2331,11 @@ export default function Home() {
               <thead className="bg-slate-50 text-slate-700">
                 <tr>
                   <th className="px-5 py-4 font-semibold">Aluno</th>
-                  <th className="px-5 py-4 font-semibold">Turma</th>
-                  <th className="px-5 py-4 font-semibold">Parcela</th>
-                  <th className="px-5 py-4 font-semibold">Vencimento</th>
-                  <th className="px-5 py-4 font-semibold">Valor</th>
-                  <th className="px-5 py-4 font-semibold">Comprovante</th>
+                  <th className="px-5 py-4 font-semibold">Escola</th>
+                  <th className="px-5 py-4 font-semibold">Valor contrato</th>
+                  <th className="px-5 py-4 font-semibold">Falta quitar</th>
+                  <th className="px-5 py-4 font-semibold">Prazo final de quitação</th>
+                  <th className="px-5 py-4 font-semibold">Valor da parcela</th>
                   <th className="px-5 py-4 font-semibold">Status</th>
                   <th className="px-5 py-4 font-semibold">Ações</th>
                 </tr>
@@ -2240,18 +2345,17 @@ export default function Home() {
                   parcelasFinanceiro.map((item) => (
                     <tr key={item.aluno.id} className="border-t border-slate-200 hover:bg-slate-50">
                       <td className="px-5 py-5 font-semibold text-slate-950">{item.aluno.nome}</td>
-                      <td className="px-5 py-5">{item.aluno.turma || "-"}</td>
-                      <td className="px-5 py-5">{item.numero}</td>
-                      <td className="px-5 py-5">{item.vencimento}</td>
+                      <td className="px-5 py-5">{item.aluno.escola || "-"}</td>
+                      <td className="px-5 py-5">{moeda(item.aluno.valorContrato)}</td>
+                      <td className="px-5 py-5">{moeda(item.aluno.valorRestanteContrato ?? item.aluno.valorContrato)}</td>
+                      <td className="px-5 py-5">{item.prazoFinalQuitacao && item.prazoFinalQuitacao !== "-" ? new Date(`${item.prazoFinalQuitacao}T00:00:00`).toLocaleDateString("pt-BR") : "-"}</td>
                       <td className="px-5 py-5">{moeda(item.valor)}</td>
-                      <td className="px-5 py-5">{item.comprovante}</td>
                       <td className="px-5 py-5">
-                        <select value={item.status} onChange={() => undefined} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                        <select value={item.status} onChange={(e) => atualizarStatusParcela(item.aluno.id, e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
                           <option value="pendente">pendente</option>
+                          <option value="inadimplente">inadimplente</option>
                           <option value="pago">pago</option>
-                          <option value="atrasado">atrasado</option>
                           <option value="parcial">parcial</option>
-                          <option value="cancelado">cancelado</option>
                         </select>
                       </td>
                       <td className="px-5 py-5">
@@ -2275,11 +2379,32 @@ export default function Home() {
 
   function tarefasView() {
     const departamentos = ["todos", "Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administracao", "concluidas"];
+    const hoje = new Date().toISOString().slice(0, 10);
     const demandas = demandasInternas.filter((demanda) => {
-      if (departamentoAtivo === "concluidas") return demanda.status === "concluida";
-      if (departamentoAtivo === "todos") return true;
-      return demanda.departamento === departamentoAtivo;
+      if (departamentoAtivo === "concluidas" && demanda.status !== "concluida") return false;
+      if (departamentoAtivo !== "todos" && departamentoAtivo !== "concluidas" && demanda.departamento !== departamentoAtivo) return false;
+      if (tarefaFiltroResponsavel !== "todos" && demanda.responsavel !== tarefaFiltroResponsavel) return false;
+      if (tarefaFiltroPrioridade !== "todas" && demanda.prioridade !== tarefaFiltroPrioridade) return false;
+      if (tarefaFiltroPrazo === "hoje" && demanda.prazo !== hoje) return false;
+      if (tarefaFiltroPrazo === "atrasadas" && !(demanda.prazo < hoje && demanda.status !== "concluida")) return false;
+      if (tarefaFiltroPrazo === "sem-prazo" && Boolean(demanda.prazo)) return false;
+      if (tarefaBusca.trim()) {
+        const alvo = `${demanda.titulo} ${demanda.aluno || ""} ${demanda.departamento} ${demanda.responsavel}`.toLowerCase();
+        if (!alvo.includes(tarefaBusca.trim().toLowerCase())) return false;
+      }
+      return true;
     });
+    const demandasHoje = demandas.filter((demanda) => demanda.prazo === hoje && demanda.status !== "concluida");
+    const demandasAtrasadas = demandas.filter((demanda) => demanda.prazo < hoje && demanda.status !== "concluida");
+    const demandasSemResponsavel = demandas.filter((demanda) => !demanda.responsavel?.trim());
+    const demandasConcluidasHoje = demandas.filter((demanda) => demanda.status === "concluida" && demanda.prazo === hoje);
+    const tarefasPorStatus = {
+      aberta: demandas.filter((demanda) => demanda.status === "aberta"),
+      "em andamento": demandas.filter((demanda) => demanda.status === "em andamento"),
+      aguardando: demandas.filter((demanda) => demanda.status === "aguardando"),
+      concluida: demandas.filter((demanda) => demanda.status === "concluida")
+    } as const;
+    const tarefaDetalhe = demandas.find((demanda) => demanda.id === tarefaDetalheId) || null;
     const prioridadeClasse: Record<string, string> = {
       media: "bg-sky-100 text-sky-800",
       alta: "bg-amber-100 text-amber-800",
@@ -2287,18 +2412,18 @@ export default function Home() {
     };
 
     return (
-      <section className="grid gap-6 xl:grid-cols-[475px_minmax(0,1fr)]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-950">Criar demanda</h2>
+      <section className="grid items-start gap-4 xl:grid-cols-[400px_minmax(0,1fr)]">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-[1.5rem] font-semibold text-slate-950">Criar demanda</h2>
           <div className="mt-6 space-y-4">
-            <input type="text" placeholder="Descrição da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={novaDemandaForm.aluno} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+            <input type="text" placeholder="Descrição da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <select value={novaDemandaForm.aluno} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="">Aluno vinculado</option>
               {alunos.map((aluno) => (
                 <option key={aluno.id} value={aluno.nome}>{aluno.nome}</option>
               ))}
             </select>
-            <select value={novaDemandaForm.departamento} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, departamento: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+            <select value={novaDemandaForm.departamento} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, departamento: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="Financeiro">Financeiro</option>
               <option value="Atendimento">Atendimento</option>
               <option value="Contratos">Contratos</option>
@@ -2306,69 +2431,136 @@ export default function Home() {
               <option value="Distratos">Distratos</option>
               <option value="Administracao">Administracao</option>
             </select>
-            <select value={novaDemandaForm.responsavelId} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, responsavelId: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+            <select value={novaDemandaForm.responsavelId} onChange={(e) => { setNovaDemandaForm({ ...novaDemandaForm, responsavelId: e.target.value }); if (e.target.value) setErroResponsavelDemanda(false); }} className={`w-full rounded-2xl border bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:ring-2 ${erroResponsavelDemanda ? "border-rose-300 focus:border-rose-500 focus:ring-rose-200" : "border-slate-200 focus:border-sky-500 focus:ring-sky-200"}`}>
               <option value="">Responsável (usuário cadastrado)</option>
               {usuariosCadastrados.map((usuario) => (
                 <option key={usuario.id} value={usuario.id}>{usuario.nome}</option>
               ))}
             </select>
-            <select value={novaDemandaForm.prioridade} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, prioridade: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+            {erroResponsavelDemanda && (
+              <p className="text-sm font-medium text-rose-700">Responsável é obrigatório.</p>
+            )}
+            <select value={novaDemandaForm.prioridade} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, prioridade: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option value="media">media</option>
               <option value="alta">alta</option>
               <option value="urgente">urgente</option>
             </select>
-            <textarea placeholder="Comentário inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <button type="button" onClick={salvarDemanda} disabled={!infraOnline || usuariosCadastrados.length === 0} className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-lg font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar demanda</button>
+            <textarea placeholder="Comentário inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <button type="button" onClick={salvarDemanda} disabled={!infraOnline || usuariosCadastrados.length === 0} className="w-full rounded-2xl bg-slate-950 px-5 py-3 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar demanda</button>
             {usuariosCadastrados.length === 0 && (
               <p className="text-sm text-amber-700">Cadastre ao menos um usuário para selecionar o responsável da tarefa.</p>
             )}
           </div>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-950">Fila por departamento</h2>
-          <div className="mt-6 flex flex-wrap gap-3">
-            {departamentos.map((departamento) => (
-              <button
-                key={departamento}
-                type="button"
-                onClick={() => setDepartamentoAtivo(departamento)}
-                className={`rounded-xl border px-5 py-3 text-xl transition ${departamentoAtivo === departamento ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}
-              >
-                {departamento === "concluidas" ? "Concluídas" : departamento}
-              </button>
-            ))}
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-[1.5rem] font-semibold text-slate-950">Fila por departamento</h2>
+            <div className="mt-6 flex flex-wrap gap-3">
+              {departamentos.map((departamento) => (
+                <button
+                  key={departamento}
+                  type="button"
+                  onClick={() => setDepartamentoAtivo(departamento)}
+                  className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${departamentoAtivo === departamento ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}
+                >
+                  {departamento === "concluidas" ? "Concluídas" : departamento}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <input value={tarefaBusca} onChange={(e) => setTarefaBusca(e.target.value)} placeholder="Buscar tarefa" className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <select value={tarefaFiltroResponsavel} onChange={(e) => setTarefaFiltroResponsavel(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="todos">Responsável: todos</option>
+                {Array.from(new Set(demandasInternas.map((d) => d.responsavel).filter(Boolean))).map((responsavel) => (
+                  <option key={responsavel} value={responsavel}>{responsavel}</option>
+                ))}
+              </select>
+              <select value={tarefaFiltroPrioridade} onChange={(e) => setTarefaFiltroPrioridade(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="todas">Prioridade: todas</option>
+                <option value="media">Média</option>
+                <option value="alta">Alta</option>
+                <option value="urgente">Urgente</option>
+              </select>
+              <select value={tarefaFiltroPrazo} onChange={(e) => setTarefaFiltroPrazo(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="todos">Prazo: todos</option>
+                <option value="hoje">Vencendo hoje</option>
+                <option value="atrasadas">Atrasadas</option>
+                <option value="sem-prazo">Sem prazo</option>
+              </select>
+              <button type="button" onClick={() => { setTarefaBusca(""); setTarefaFiltroPrazo("todos"); setTarefaFiltroPrioridade("todas"); setTarefaFiltroResponsavel("todos"); }} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Limpar filtros</button>
+            </div>
           </div>
 
-          <div className="mt-5 space-y-4">
-            {demandas.map((demanda) => (
-              <div key={demanda.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <h3 className="text-2xl font-semibold text-slate-950">{demanda.titulo}</h3>
-                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
-                    <div className="mt-5 space-y-2 text-lg text-[#08265f]">
-                      <p>Responsável: {demanda.responsavel}</p>
-                      <p>Prazo: {demanda.prazo}</p>
-                      <p>Comentários: {demanda.comentarios.length ? demanda.comentarios.join(" | ") : "-"}</p>
-                      <p>Anexos: {demanda.anexos.length ? demanda.anexos.join(" | ") : "-"}</p>
-                    </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Hoje</p><p className="mt-2 text-2xl font-semibold">{demandasHoje.length}</p></div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Atrasadas</p><p className="mt-2 text-2xl font-semibold">{demandasAtrasadas.length}</p></div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Concluídas hoje</p><p className="mt-2 text-2xl font-semibold">{demandasConcluidasHoje.length}</p></div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {[
+                { key: "aberta", title: "Abertas", data: tarefasPorStatus.aberta },
+                { key: "em andamento", title: "Em andamento", data: tarefasPorStatus["em andamento"] },
+                { key: "aguardando", title: "Aguardando", data: tarefasPorStatus.aguardando },
+                { key: "concluida", title: "Concluídas", data: tarefasPorStatus.concluida }
+              ].map((coluna) => (
+                <div key={coluna.key} className="self-start rounded-2xl border border-slate-200 bg-white p-3">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-700">{coluna.title}</h3>
+                    <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{coluna.data.length}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                    <select value={demanda.status} onChange={(e) => atualizarStatusDemanda(demanda.id, e.target.value)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xl text-slate-950">
-                      <option value="aberta">aberta</option>
-                      <option value="em andamento">em andamento</option>
-                      <option value="aguardando">aguardando</option>
-                      <option value="concluida">concluida</option>
-                    </select>
-                    <button type="button" onClick={() => removerDemanda(demanda.id)} className="rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50">
-                      Apagar tarefa
-                    </button>
+                  <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
+                    {coluna.data.map((demanda) => (
+                      <button key={demanda.id} type="button" onClick={() => setTarefaDetalheId(demanda.id)} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-left hover:border-sky-200 hover:bg-white">
+                        <p className="text-sm font-semibold text-slate-950">{demanda.titulo}</p>
+                        <p className="mt-1 text-xs text-slate-600">{demanda.aluno || "Aluno"} · {demanda.departamento}</p>
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className={`rounded-md px-2 py-1 text-xs font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
+                          <span className="text-xs text-slate-500">{demanda.prazo || "Sem prazo"}</span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Criação: {demanda.criadoEm ? new Date(demanda.criadoEm).toLocaleDateString("pt-BR") : "-"}
+                        </p>
+                      </button>
+                    ))}
+                    {coluna.data.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 p-3 text-xs text-slate-500">Sem tarefas</p>}
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-slate-700">Detalhes da tarefa</h3>
+              {!tarefaDetalhe ? (
+                <p className="mt-3 text-sm text-slate-500">Clique em uma tarefa do quadro para abrir detalhes.</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <p className="text-base font-semibold text-slate-950">{tarefaDetalhe.titulo}</p>
+                  <p className="text-sm text-slate-600">{tarefaDetalhe.aluno || "Aluno"} · {tarefaDetalhe.departamento}</p>
+                  <p className="text-sm text-slate-700">Responsável: {tarefaDetalhe.responsavel || "-"}</p>
+                  <p className="text-sm text-slate-700">Prazo: {tarefaDetalhe.prazo || "Sem prazo"}</p>
+                  <p className="text-sm text-slate-700">Criação: {tarefaDetalhe.criadoEm ? new Date(tarefaDetalhe.criadoEm).toLocaleString("pt-BR") : "-"}</p>
+                  <p className="text-sm text-slate-700">Conclusão: {tarefaDetalhe.concluidoEm ? new Date(tarefaDetalhe.concluidoEm).toLocaleString("pt-BR") : "-"}</p>
+                  <select value={tarefaDetalhe.status} onChange={(e) => atualizarStatusDemanda(tarefaDetalhe.id, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="aberta">aberta</option>
+                    <option value="em andamento">em andamento</option>
+                    <option value="aguardando">aguardando</option>
+                    <option value="concluida">concluida</option>
+                  </select>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Comentários</p>
+                    {tarefaDetalhe.comentarios.length > 0 ? tarefaDetalhe.comentarios.map((comentario, index) => (
+                      <p key={`${tarefaDetalhe.id}-${index}`} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">{comentario}</p>
+                    )) : <p className="text-sm text-slate-500">Sem comentários</p>}
+                  </div>
+                  <textarea value={comentarioDemanda} onChange={(e) => { setDemandaSelecionadaId(tarefaDetalhe.id); setComentarioDemanda(e.target.value); }} placeholder="Adicionar comentário" className="min-h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                  <button type="button" onClick={adicionarComentarioDemanda} className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Salvar comentário</button>
+                  <button type="button" onClick={() => removerDemanda(tarefaDetalhe.id)} className="w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Apagar tarefa</button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -2732,7 +2924,7 @@ export default function Home() {
                       <td className="px-5 py-5 align-top">{aluno.turma || "-"}</td>
                       <td className="px-5 py-5 align-top">{aluno.nomeResponsavel || "-"}</td>
                       <td className="px-5 py-5 align-top">
-                        <select value={Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) <= 0 ? "ativo" : "inadimplente"} onChange={() => undefined} className="w-40 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-950 outline-none">
+                        <select value={(aluno.status || (Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) <= 0 ? "ativo" : "inadimplente")).toLowerCase()} onChange={(e) => atualizarStatusAlunoLocal(aluno.id, e.target.value)} className="w-40 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-950 outline-none">
                           <option value="ativo">ativo</option>
                           <option value="pendente">pendente</option>
                           <option value="inadimplente">inadimplente</option>
@@ -2810,47 +3002,47 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-slate-950 lg:bg-slate-100">
-      <main className="grid min-h-screen lg:grid-cols-[335px_minmax(0,1fr)]">
-        <aside className="bg-white px-7 py-7 text-[#08265f] lg:min-h-screen">
+    <div className="min-h-screen bg-[#f6f7f9] text-slate-900">
+      <main className="grid min-h-screen lg:grid-cols-[290px_minmax(0,1fr)]">
+        <aside className="border-r border-slate-200 bg-white px-5 py-5 text-slate-700 lg:min-h-screen">
           <div>
             <p className="text-sm font-medium uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-black">Sistema interno</h1>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Sistema interno</h1>
           </div>
 
-          <div className="mt-12 space-y-5">
+          <div className="mt-8 space-y-2">
             {navItems.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={item.action}
-                className={`w-full rounded-[14px] px-5 py-4 text-left text-xl leading-none transition ${view === item.id ? "bg-[#02071a] text-white" : "text-[#08265f] hover:bg-slate-100"}`}
+                className={`w-full rounded-lg px-4 py-2.5 text-left text-sm font-medium leading-none transition ${view === item.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
               >
                 {item.label}
               </button>
             ))}
           </div>
 
-          <div className="mt-14 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Departamento ativo</p>
-            <select value={departamentoAtivo} onChange={(e) => setDepartamentoAtivo(e.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-lg text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+          <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Departamento ativo</p>
+            <select value={departamentoAtivo} onChange={(e) => setDepartamentoAtivo(e.target.value)} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
               <option>Administracao</option>
               <option>Financeiro</option>
               <option>Atendimento</option>
               <option>Contratos</option>
               <option>Eventos</option>
             </select>
-            <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-[#08265f]">
-              <span className="rounded-lg bg-white px-3 py-2">Usuários</span>
-              <span className="rounded-lg bg-white px-3 py-2">Permissões</span>
-              <span className="rounded-lg bg-white px-3 py-2">Departamentos</span>
-              <span className="rounded-lg bg-white px-3 py-2">Configurações</span>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+              <span className="rounded-md bg-white px-2.5 py-1.5">Usuários</span>
+              <span className="rounded-md bg-white px-2.5 py-1.5">Permissões</span>
+              <span className="rounded-md bg-white px-2.5 py-1.5">Departamentos</span>
+              <span className="rounded-md bg-white px-2.5 py-1.5">Configurações</span>
             </div>
           </div>
         </aside>
 
-        <section className="min-w-0 bg-slate-100 p-4 sm:p-6">
-          <header className="border-b border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <section className="min-w-0 bg-[#f6f7f9] p-4 sm:p-5">
+          <header className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-3">
                 <div className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${healthStatus.checked ? (healthStatus.serverOnline ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700") : "border-slate-200 bg-slate-50 text-slate-700"}`}>
@@ -2878,24 +3070,26 @@ export default function Home() {
                 <p className="text-sm font-semibold text-rose-700">Salvamento bloqueado ate servidor e banco ficarem online.</p>
               )}
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">Administracao</p>
-                <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
+                <p className="text-xs font-semibold text-slate-500">Administracao</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
               </div>
-              <div className="grid gap-3 sm:grid-cols-4">
-                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Alunos</p>
+              <div className={`grid gap-3 ${view === "financeiro" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-xs font-semibold text-slate-600">Alunos</p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">{indicadores.totalAlunos}</p>
                 </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Em aberto</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
-                </div>
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Tarefas</p>
+                {view === "financeiro" && (
+                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold text-slate-600">Em aberto</p>
+                    <p className="mt-2 text-xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
+                  </div>
+                )}
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-xs font-semibold text-slate-600">Tarefas</p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">{totalTarefasAbertas}</p>
                 </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Usuarios</p>
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-xs font-semibold text-slate-600">Usuarios</p>
                   <p className="mt-2 text-xl font-semibold text-slate-950">{totalUsuarios}</p>
                 </div>
               </div>
@@ -2903,6 +3097,44 @@ export default function Home() {
           </header>
 
           <div className="mt-4 space-y-4">
+            <div className="sticky top-3 z-20 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+              <div className="flex flex-wrap items-center gap-2">
+                {view === "menu" && (
+                  <>
+                    <button type="button" onClick={() => setView("alunos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Alunos</button>
+                    <button type="button" onClick={() => setView("financeiro")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Financeiro</button>
+                    <button type="button" onClick={() => setView("tarefas")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Tarefas</button>
+                  </>
+                )}
+                {view === "alunos" && (
+                  <>
+                    <button type="button" onClick={() => { setView("aluno"); listarEscolas(); }} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Novo aluno</button>
+                    <button type="button" onClick={listarTodos} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atualizar lista</button>
+                  </>
+                )}
+                {view === "escolas" && (
+                  <>
+                    <button type="button" onClick={() => setView("escola")} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Nova escola</button>
+                    <button type="button" onClick={listarEscolas} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atualizar lista</button>
+                  </>
+                )}
+                {view === "financeiro" && (
+                  <>
+                    <button type="button" onClick={buscarAlunoFinanceiro} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Buscar</button>
+                    <button type="button" onClick={() => setFiltroParcela("todos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Parcelas: todos</button>
+                  </>
+                )}
+                {view === "tarefas" && (
+                  <>
+                    <button type="button" onClick={() => setDepartamentoAtivo("todos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Fila completa</button>
+                    <button type="button" onClick={() => setTarefaFiltroPrazo("atrasadas")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atrasadas</button>
+                  </>
+                )}
+                {view === "usuarios" && (
+                  <button type="button" onClick={salvarUsuarioSistema} disabled={!infraOnline} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar usuário</button>
+                )}
+              </div>
+            </div>
             {view === "menu" && menuInicialInterativo()}
             {view === "aluno" && cadastroAluno()}
             {view === "alunos" && consultaAlunos()}

@@ -25,6 +25,11 @@ public class PagamentoController {
         this.alunoRepository = alunoRepository;
     }
 
+    @GetMapping
+    public List<Pagamento> listarTodos() {
+        return pagamentoRepository.findAll();
+    }
+
     @PostMapping
     public Pagamento registrarPagamento(@RequestBody Pagamento pagamento) {
         if (pagamento.getAluno() == null || pagamento.getAluno().getId() == null) {
@@ -36,6 +41,9 @@ public class PagamentoController {
 
         if (pagamento.getNumeroParcela() == null) {
             pagamento.setNumeroParcela(0);
+        }
+        if (pagamento.getNumeroParcela() < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Numero de parcela invalido.");
         }
 
         Aluno aluno = alunoRepository.findById(pagamento.getAluno().getId())

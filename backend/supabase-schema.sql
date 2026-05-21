@@ -80,3 +80,10 @@ create table if not exists demanda_anexos (
   demanda_id bigint references demanda(id) on delete cascade,
   anexo text
 );
+
+create table if not exists observacao_aluno (
+  id bigserial primary key,
+  aluno_id bigint references aluno(id) on delete cascade,
+  texto varchar(2000),
+  data_criacao timestamp
+);

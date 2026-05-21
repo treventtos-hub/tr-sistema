@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/demandas")
@@ -26,12 +27,14 @@ public class DemandaController {
 
     @PostMapping
     public Demanda criar(@RequestBody Demanda demanda) {
+        validarDemanda(demanda);
         demanda.setId(null);
         return repository.save(demanda);
     }
 
     @PutMapping("/{id}")
     public Demanda atualizar(@PathVariable Long id, @RequestBody Demanda payload) {
+        validarDemanda(payload);
         Demanda demanda = repository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Demanda nao encontrada."));
 
@@ -51,6 +54,7 @@ public class DemandaController {
     public Demanda atualizarStatus(@PathVariable Long id, @RequestBody Demanda payload) {
         Demanda demanda = repository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Demanda nao encontrada."));
+        validarStatus(payload.getStatus());
         demanda.setStatus(payload.getStatus());
         return repository.save(demanda);
     }
@@ -62,5 +66,33 @@ public class DemandaController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Demanda nao encontrada.");
         }
         repository.deleteById(id);
+    }
+
+    private void validarDemanda(Demanda demanda) {
+        if (demanda == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da demanda nao enviados.");
+        }
+        if (demanda.getTitulo() == null || demanda.getTitulo().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Titulo da demanda e obrigatorio.");
+        }
+        if (demanda.getDepartamento() == null || demanda.getDepartamento().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Departamento da demanda e obrigatorio.");
+        }
+        validarStatus(demanda.getStatus());
+        validarPrioridade(demanda.getPrioridade());
+    }
+
+    private void validarStatus(String status) {
+        Set<String> permitidos = Set.of("aberta", "em andamento", "aguardando", "concluida");
+        if (status == null || !permitidos.contains(status)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status invalido.");
+        }
+    }
+
+    private void validarPrioridade(String prioridade) {
+        Set<String> permitidos = Set.of("media", "alta", "urgente");
+        if (prioridade == null || !permitidos.contains(prioridade)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Prioridade invalida.");
+        }
     }
 }

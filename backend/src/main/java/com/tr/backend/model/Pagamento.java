@@ -2,6 +2,7 @@ package com.tr.backend.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -18,7 +19,7 @@ public class Pagamento {
 
     private String nomeAluno;
 
-    private Double valor;
+    private BigDecimal valor;
 
     private Integer numeroParcela;
 

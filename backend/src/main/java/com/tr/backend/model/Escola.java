@@ -5,6 +5,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import lombok.Data;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -30,13 +31,13 @@ public class Escola {
 
     private Integer quantidadeSenhasExtras;
 
-    private Double valorSenhaExtra;
+    private BigDecimal valorSenhaExtra;
 
-    private Double valorBaile;
+    private BigDecimal valorBaile;
 
-    private Double valorKitFormatura;
+    private BigDecimal valorKitFormatura;
 
-    private Double valorPlacaReplica;
+    private BigDecimal valorPlacaReplica;
 
-    private Double valorPlacaHomenagem;
+    private BigDecimal valorPlacaHomenagem;
 }

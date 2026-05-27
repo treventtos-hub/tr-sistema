@@ -5,6 +5,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import lombok.Data;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -26,9 +27,9 @@ public class ComissaoFormatura {
 
     private String turma;
 
-    private Double valorContratoOriginal;
+    private BigDecimal valorContratoOriginal;
 
-    private Double desconto;
+    private BigDecimal desconto;
 
-    private Double valorContratoComDesconto;
+    private BigDecimal valorContratoComDesconto;
 }

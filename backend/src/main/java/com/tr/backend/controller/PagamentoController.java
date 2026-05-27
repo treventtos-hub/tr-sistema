@@ -14,7 +14,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/pagamentos")
-@CrossOrigin("*")
+@CrossOrigin(origins = "${app.cors.allowed-origins:http://localhost:3000}")
 public class PagamentoController {
 
     private final PagamentoRepository pagamentoRepository;
@@ -25,38 +25,29 @@ public class PagamentoController {
         this.alunoRepository = alunoRepository;
     }
 
-    @GetMapping
-    public List<Pagamento> listarTodos() {
-        return pagamentoRepository.findAll();
-    }
-
     @PostMapping
     public Pagamento registrarPagamento(@RequestBody Pagamento pagamento) {
         if (pagamento.getAluno() == null || pagamento.getAluno().getId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o aluno do pagamento.");
         }
-        if (pagamento.getValor() == null || pagamento.getValor() <= 0) {
+        if (pagamento.getValor() == null || pagamento.getValor().compareTo(BigDecimal.ZERO) <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um valor de pagamento valido.");
         }
 
         if (pagamento.getNumeroParcela() == null) {
             pagamento.setNumeroParcela(0);
         }
-        if (pagamento.getNumeroParcela() < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Numero de parcela invalido.");
-        }
 
         Aluno aluno = alunoRepository.findById(pagamento.getAluno().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aluno nao encontrado."));
 
-        Double saldoAtual = aluno.getValorRestanteContrato() != null
+        BigDecimal saldoAtual = aluno.getValorRestanteContrato() != null
                 ? aluno.getValorRestanteContrato()
                 : aluno.getValorContrato();
-        BigDecimal valorAtualContrato = BigDecimal.valueOf(saldoAtual == null ? 0 : saldoAtual);
-        BigDecimal valorPago = BigDecimal.valueOf(pagamento.getValor());
-        BigDecimal novoValorContrato = valorAtualContrato.subtract(valorPago);
+        BigDecimal valorAtualContrato = saldoAtual == null ? BigDecimal.ZERO : saldoAtual;
+        BigDecimal novoValorContrato = valorAtualContrato.subtract(pagamento.getValor());
 
-        aluno.setValorRestanteContrato(novoValorContrato.signum() > 0 ? novoValorContrato.doubleValue() : 0);
+        aluno.setValorRestanteContrato(novoValorContrato.signum() > 0 ? novoValorContrato : BigDecimal.ZERO);
         alunoRepository.save(aluno);
 
         pagamento.setAluno(aluno);
@@ -72,8 +63,11 @@ public class PagamentoController {
     }
 
     @GetMapping("/aluno/{alunoId}/total")
-    public Double getTotalPago(@PathVariable Long alunoId) {
+    public BigDecimal getTotalPago(@PathVariable Long alunoId) {
         List<Pagamento> pagamentos = pagamentoRepository.findByAlunoId(alunoId);
-        return pagamentos.stream().mapToDouble(Pagamento::getValor).sum();
+        return pagamentos.stream()
+                .map(Pagamento::getValor)
+                .filter(valor -> valor != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

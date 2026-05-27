@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiUrl } from "@/lib/api";
 
-type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "financeiro" | "tarefas" | "usuarios";
+type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "cobrancas" | "manutencao";
 
 type Aluno = {
   id: number;
@@ -12,12 +13,10 @@ type Aluno = {
   telefone?: string;
   escola?: string;
   turma?: string;
-  formaPagamento?: string;
   valorContrato?: number;
   valorRestanteContrato?: number;
   valorMensal?: number;
   parcelas?: number;
-  status?: string;
   baile?: boolean;
   kitFormatura?: boolean;
   placaHomenagem?: boolean;
@@ -65,43 +64,72 @@ type ComissaoFormatura = {
   valorContratoComDesconto?: number;
 };
 
-type Demanda = {
+type CobrancaStatus = "AGUARDANDO_RESPOSTA" | "RESOLVIDO" | "COBRAR_NOVAMENTE_15_DIAS";
+
+type Cobranca = {
   id: number;
-  titulo: string;
-  aluno?: string;
-  departamento: string;
-  responsavel: string;
-  prazo: string;
+  alunoId: number;
+  nomeAluno?: string;
+  nomeResponsavel?: string;
+  telefoneResponsavel?: string;
+  escola?: string;
+  turma?: string;
+  status: CobrancaStatus;
+  observacao?: string;
+  dataCobranca?: string;
+  dataLembrete?: string;
   criadoEm?: string;
-  concluidoEm?: string | null;
-  comentarios: string[];
-  anexos: string[];
-  prioridade: string;
-  status: string;
+  atualizadoEm?: string;
+  criadoPor?: string;
+  atualizadoPor?: string;
 };
 
-type UsuarioSistema = {
+type Usuario = {
   id: number;
   nome: string;
-  email: string;
-  perfil: string;
+  login: string;
+  perfil?: string;
+  sessaoToken?: string;
 };
 
-type HealthStatus = {
-  serverOnline: boolean;
-  databaseOnline: boolean;
-  checked: boolean;
+type TabelaManutencao = {
+  tabela: string;
+  linhas: number;
+  tamanhoBytes: number;
+  tamanhoTotal: string;
 };
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+type ManutencaoStatus = {
+  statusLotacao: string;
+  usoEstimado: string;
+  registros: number;
+  anoSelecionado: number;
+  lembrete: string;
+  tabelas: TabelaManutencao[];
+};
+
+const cobrancaStatusOptions: { value: CobrancaStatus; label: string }[] = [
+  { value: "AGUARDANDO_RESPOSTA", label: "Aguardando resposta" },
+  { value: "RESOLVIDO", label: "Resolvido" },
+  { value: "COBRAR_NOVAMENTE_15_DIAS", label: "Cobrar novamente em 15 dias" }
+];
+
+function dataISO(dias = 0) {
+  const data = new Date();
+  data.setDate(data.getDate() + dias);
+  return data.toISOString().slice(0, 10);
+}
 
 export default function Home() {
   const [view, setView] = useState<ViewMode>("menu");
-  const [authChecked] = useState(true);
-  const [authHeader, setAuthHeader] = useState(() => (typeof window === "undefined" ? "" : window.localStorage.getItem("trAuthHeader") || ""));
-  const [loginForm, setLoginForm] = useState({ email: "", senha: "" });
-  const [loginErro, setLoginErro] = useState("");
-  const [loginCarregando, setLoginCarregando] = useState(false);
+  const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(() => {
+    if (typeof window === "undefined") return null;
+    const usuarioSalvo = window.localStorage.getItem("tr_usuario");
+    return usuarioSalvo ? JSON.parse(usuarioSalvo) : null;
+  });
+  const [loginForm, setLoginForm] = useState({ login: "", senha: "" });
+  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", login: "", senha: "" });
+  const [mostrarCadastroUsuario, setMostrarCadastroUsuario] = useState(false);
   const [alunoForm, setAlunoForm] = useState({
     nome: "",
     nomeResponsavel: "",
@@ -110,7 +138,6 @@ export default function Home() {
     escolaId: "",
     escola: "",
     turma: "",
-    formaPagamento: "",
     parcelas: "",
     baile: false,
     kitFormatura: false,
@@ -142,7 +169,6 @@ export default function Home() {
   const [numeroParcela, setNumeroParcela] = useState("");
   const [alunoSelecionado, setAlunoSelecionado] = useState<Aluno | null>(null);
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
-  const [pagamentosSistema, setPagamentosSistema] = useState<Pagamento[]>([]);
   const [ultimoPagamento, setUltimoPagamento] = useState<Pagamento | null>(null);
   const [mostrarComissao, setMostrarComissao] = useState(false);
   const [comissaoForm, setComissaoForm] = useState({ escolaId: "", alunoId: "", desconto: "" });
@@ -156,44 +182,35 @@ export default function Home() {
   const [alunoEditando, setAlunoEditando] = useState<Aluno | null>(null);
   const [escolaEditando, setEscolaEditando] = useState<Escola | null>(null);
   const [mostrarAlunosEscola, setMostrarAlunosEscola] = useState(false);
-  const [departamentoAtivo, setDepartamentoAtivo] = useState("Administracao");
-  const [filtroParcela, setFiltroParcela] = useState("todos");
-  const [financeiroBusca, setFinanceiroBusca] = useState({ nome: "", responsavel: "", escola: "" });
-  const [financeiroResultados, setFinanceiroResultados] = useState<Aluno[]>([]);
-  const [financeiroBuscaRealizada, setFinanceiroBuscaRealizada] = useState(false);
-  const [usuariosCadastrados, setUsuariosCadastrados] = useState<UsuarioSistema[]>([]);
-  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", email: "", perfil: "Administrador" });
-  const [novaDemandaForm, setNovaDemandaForm] = useState({
-    titulo: "",
-    aluno: "",
-    departamento: "Financeiro",
-    responsavelId: "",
-    prioridade: "media",
-    comentario: ""
+  const [cobrancas, setCobrancas] = useState<Cobranca[]>([]);
+  const [cobrancaEditando, setCobrancaEditando] = useState<Cobranca | null>(null);
+  const [cobrancaFiltroStatus, setCobrancaFiltroStatus] = useState("");
+  const [comentariosCobranca, setComentariosCobranca] = useState<Record<number, string>>({});
+  const [cobrancaForm, setCobrancaForm] = useState({
+    alunoId: "",
+    status: "AGUARDANDO_RESPOSTA" as CobrancaStatus,
+    observacao: "",
+    dataCobranca: dataISO(),
+    dataLembrete: dataISO(15)
   });
-  const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
-  const [comentarioDemanda, setComentarioDemanda] = useState("");
-  const [demandaRemovida, setDemandaRemovida] = useState<Demanda | null>(null);
-  const [erroResponsavelDemanda, setErroResponsavelDemanda] = useState(false);
-  const [tarefaBusca, setTarefaBusca] = useState("");
-  const [tarefaFiltroResponsavel, setTarefaFiltroResponsavel] = useState("todos");
-  const [tarefaFiltroPrioridade, setTarefaFiltroPrioridade] = useState("todas");
-  const [tarefaFiltroPrazo, setTarefaFiltroPrazo] = useState("todos");
-  const [tarefaDetalheId, setTarefaDetalheId] = useState<number | null>(null);
-  const [statusParcelaOverride, setStatusParcelaOverride] = useState<Record<number, string>>({});
-  const [healthStatus, setHealthStatus] = useState<HealthStatus>({
-    serverOnline: false,
-    databaseOnline: false,
-    checked: false
-  });
-  const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([]);
+  const [manutencaoStatus, setManutencaoStatus] = useState<ManutencaoStatus | null>(null);
+
+  useEffect(() => {
+    if (!usuarioLogado) return;
+    listarTodos();
+    listarEscolas();
+    listarCobrancas();
+    carregarManutencao();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuarioLogado]);
 
   const indicadores = useMemo(() => {
     return {
       totalAlunos: alunos.length,
-      totalEscolas: escolas.length
+      totalEscolas: escolas.length,
+      cobrancasPendentes: cobrancas.filter((cobranca) => cobranca.status !== "RESOLVIDO").length
     };
-  }, [alunos, escolas]);
+  }, [alunos, escolas, cobrancas]);
 
   const escolaSelecionada = useMemo(
     () => escolas.find((escola) => escola.id.toString() === alunoForm.escolaId),
@@ -237,89 +254,9 @@ export default function Home() {
       .filter((aluno) => aluno.escola === escolaDetalhe?.nomeEscola)
       .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [alunos, escolaDetalhe]);
-  const financeiroResumo = useMemo(() => {
-    const contratado = alunos.reduce((total, aluno) => total + Number(aluno.valorContrato || 0), 0);
-    const valorEmAberto = alunos.reduce((total, aluno) => {
-      const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
-      return restante > 0 ? total + restante : total;
-    }, 0);
-    const valorPago = alunos.reduce((total, aluno) => {
-      const contrato = Number(aluno.valorContrato || 0);
-      const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
-      return contrato > 0 && restante <= 0 ? total + contrato : total;
-    }, 0);
-    const emAberto = alunos.filter((aluno) => Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) > 0).length;
-    const pagos = alunos.filter((aluno) => Number(aluno.valorContrato || 0) > 0 && Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) <= 0).length;
-
-    return {
-      contratado,
-      valorEmAberto,
-      valorPago,
-      emAberto,
-      pagos
-    };
-  }, [alunos]);
-  const demandasComAluno = useMemo(() => {
-    return demandasInternas.map((demanda, index) => ({
-      ...demanda,
-      aluno: demanda.aluno || alunos[index]?.nome || alunos[0]?.nome || "Aluno"
-    })).filter((demanda) => demanda.status !== "concluida");
-  }, [alunos, demandasInternas]);
-  const parcelasFinanceiro = useMemo(() => {
-    return alunos.map((aluno) => {
-      const escolaAluno = escolas.find((escola) => escola.nomeEscola === aluno.escola);
-      const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
-      const contratado = Number(aluno.valorContrato || 0);
-      const statusCalculado =
-        restante <= 0
-          ? "pago"
-          : restante === contratado && contratado > 0
-            ? "pendente"
-            : alunoEstaInadimplente(aluno)
-              ? "inadimplente"
-              : "parcial";
-      const status = statusParcelaOverride[aluno.id] || statusCalculado;
-      return {
-        aluno,
-        numero: 1,
-        prazoFinalQuitacao: escolaAluno?.dataLimiteContrato || "-",
-        valor: Number(aluno.valorMensal || restante || contratado || 0),
-        status
-      };
-    }).filter((item) => filtroParcela === "todos" || item.status === filtroParcela);
-  }, [alunos, escolas, filtroParcela, statusParcelaOverride]);
-  const navItems = [
-    { id: "menu" as ViewMode, label: "Painel inicial", helper: "Resumo geral", action: () => setView("menu") },
-    { id: "alunos" as ViewMode, label: "Alunos", helper: "Cadastro e consulta", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
-    { id: "escolas" as ViewMode, label: "Turmas/Eventos", helper: "Escolas, turmas e valores", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
-    { id: "financeiro" as ViewMode, label: "Financeiro", helper: "Pagamentos, resumo e recibos", action: () => { setView("financeiro"); listarTodos(); listarEscolas(); } },
-    { id: "tarefas" as ViewMode, label: "Tarefas", helper: "Rotinas internas", action: () => setView("tarefas") },
-    { id: "usuarios" as ViewMode, label: "Usuários e permissões", helper: "Acessos", action: () => setView("usuarios") }
-  ];
-  const titulosView: Record<ViewMode, { label: string; helper: string }> = {
-    menu: { label: "Painel inicial", helper: "Visao geral do sistema antigo dentro do novo layout." },
-    aluno: { label: "Cadastro de aluno", helper: "Dados do aluno, responsavel, contrato, servicos e parcelas." },
-    alunos: { label: "Alunos", helper: "Consulta, edicao, resumo financeiro e recibos." },
-    escola: { label: "Cadastro de escola", helper: "Dados da escola, turma/evento, senhas e valores dos servicos." },
-    escolas: { label: "Turmas/Eventos", helper: "Consulta de escolas, turmas/eventos, alunos vinculados e comissao." },
-    financeiro: { label: "Financeiro", helper: "Pagamentos, resumo financeiro e gerador de recibo do sistema antigo." },
-    tarefas: { label: "Tarefas", helper: "Rotinas internas do novo layout, sem dados ficticios." },
-    usuarios: { label: "Usuarios e permissoes", helper: "Controle visual de acessos para completar o menu do sistema interno." }
-  };
-  const currentNav = titulosView[view];
-  const infraOnline = healthStatus.serverOnline && healthStatus.databaseOnline;
-  const totalTarefasAbertas = demandasInternas.filter((demanda) => demanda.status !== "concluida").length;
-  const totalUsuarios = usuariosCadastrados.length;
-  const dataPainel = useMemo(
-    () =>
-      new Date().toLocaleDateString("pt-BR", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-        year: "numeric"
-      }).replace(/\b\w/g, (letra) => letra.toUpperCase()),
-    []
-  );
+  const cobrancasFiltradas = useMemo(() => {
+    return cobrancas.filter((cobranca) => !cobrancaFiltroStatus || cobranca.status === cobrancaFiltroStatus);
+  }, [cobrancas, cobrancaFiltroStatus]);
 
   function moeda(valor?: number | string) {
     const numero = Number(valor || 0);
@@ -330,396 +267,69 @@ export default function Home() {
     return valor ? parseFloat(valor) : 0;
   }
 
-  function gerarAuthHeader(email: string, senha: string) {
-    return `Basic ${window.btoa(`${email.trim()}:${senha}`)}`;
+  function usuarioHeaders(): Record<string, string> {
+    return usuarioLogado
+      ? {
+          Authorization: `Bearer ${usuarioLogado.sessaoToken || ""}`,
+          "X-Usuario-Nome": usuarioLogado.nome,
+          "X-Usuario-Login": usuarioLogado.login
+        }
+      : {};
   }
 
-  async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-    const headers = new Headers(init.headers || {});
-    if (authHeader) {
-      headers.set("Authorization", authHeader);
-    }
-
-    const response = await fetch(input, { ...init, headers });
-    if (response.status === 401) {
-      sair();
-      alert("Sua sessão expirou. Faça login novamente.");
-    }
-    return response;
+  async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+    const headers = {
+      ...usuarioHeaders(),
+      ...(init.headers as Record<string, string> | undefined)
+    };
+    return fetch(input, { ...init, headers });
   }
 
-  async function entrar(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoginErro("");
+  async function entrar() {
+    const response = await fetch(`${apiUrl}/usuarios/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(loginForm)
+    });
+    if (!response.ok) {
+      alert("Login ou senha invalidos.");
+      return;
+    }
+    const usuario = await response.json();
+    setUsuarioLogado(usuario);
+    window.localStorage.setItem("tr_usuario", JSON.stringify(usuario));
+  }
 
-    if (!loginForm.email.trim() || !loginForm.senha) {
-      setLoginErro("Informe e-mail e senha.");
+  async function criarUsuario() {
+    if (!novoUsuarioForm.login || !novoUsuarioForm.senha) {
+      alert("Informe login e senha para criar o usuario.");
       return;
     }
 
-    setLoginCarregando(true);
-    try {
-      const response = await fetch(`${apiUrl}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginForm.email, senha: loginForm.senha })
-      });
-
-      if (!response.ok) {
-        setLoginErro(response.status === 503 ? "Login do sistema nao configurado no backend." : "Login ou senha invalido.");
-        return;
-      }
-
-      const header = gerarAuthHeader(loginForm.email, loginForm.senha);
-      window.localStorage.setItem("trAuthHeader", header);
-      setAuthHeader(header);
-      setLoginForm({ email: "", senha: "" });
-    } catch {
-      setLoginErro("Nao foi possivel conectar ao servidor da API.");
-    } finally {
-      setLoginCarregando(false);
+    const response = await fetch(`${apiUrl}/usuarios`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      body: JSON.stringify(novoUsuarioForm)
+    });
+    if (!response.ok) {
+      alert("Nao foi possivel criar o usuario.");
+      return;
     }
+
+    alert("Usuario criado. Use o login e senha para entrar.");
+    setLoginForm({ login: novoUsuarioForm.login, senha: "" });
+    setNovoUsuarioForm({ nome: "", login: "", senha: "" });
+    setMostrarCadastroUsuario(false);
   }
 
   function sair() {
-    window.localStorage.removeItem("trAuthHeader");
-    setAuthHeader("");
-    setAlunos([]);
-    setEscolas([]);
-    setAlunoSelecionado(null);
-    setAlunoDetalhe(null);
-    setAlunoFinanceiro(null);
-    setPagamentos([]);
-    setPagamentosFinanceiro([]);
-  }
-
-  async function executarBackup() {
-    if (!infraOnline) {
-      alert("Servidor ou banco offline. Nao foi possivel gerar backup.");
-      return;
-    }
-
-    try {
-      const response = await apiFetch(`${apiUrl}/backup/export`);
-      if (!response.ok) {
-        // Fallback local quando o backend ainda nao tem /backup/export em producao.
-        const payload = {
-          generatedAt: new Date().toISOString(),
-          alunos,
-          escolas,
-          demandas: demandasInternas
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-        const data = new Date();
-        const timestamp = data.toISOString().replace(/[:.]/g, "-");
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `trcrm-backup-local-${timestamp}.json`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        alert("Backup local gerado (fallback).");
-        return;
-      }
-
-      const blob = await response.blob();
-      const data = new Date();
-      const timestamp = data.toISOString().replace(/[:.]/g, "-");
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `trcrm-backup-${timestamp}.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      const mensagem = error instanceof Error ? error.message : "Falha ao gerar backup.";
-      alert(mensagem);
-    }
-  }
-
-  function alunoEstaInadimplente(aluno: Aluno) {
-    const escolaAluno = escolas.find((escola) => escola.nomeEscola === aluno.escola);
-    const inicio = escolaAluno?.mesInicioPagamento;
-    if (!inicio) return false;
-
-    const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
-    if (restante <= 0) return false;
-
-    const agora = new Date();
-    const chaveMesAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, "0")}`;
-    const chaveMesInicio = inicio.length >= 7 ? inicio.slice(0, 7) : inicio;
-    if (chaveMesAtual < chaveMesInicio) return false;
-
-    const pagamentosDoAluno = pagamentosSistema.filter((pagamento) => pagamento.aluno?.id === aluno.id);
-    const jaPagouAlgumaVez = pagamentosDoAluno.length > 0;
-    if (!jaPagouAlgumaVez) return false;
-
-    const pagouNoMes = pagamentosDoAluno.some((pagamento) => {
-      const idAlunoPagamento = pagamento.aluno?.id;
-      if (!idAlunoPagamento || idAlunoPagamento !== aluno.id) return false;
-      if (!pagamento.dataPagamento) return false;
-      const dataPagamento = new Date(pagamento.dataPagamento);
-      const chaveMesPagamento = `${dataPagamento.getFullYear()}-${String(dataPagamento.getMonth() + 1).padStart(2, "0")}`;
-      return chaveMesPagamento === chaveMesAtual;
-    });
-
-    return !pagouNoMes;
-  }
-
-  async function atualizarStatusDemanda(id: number, status: string) {
-    const atual = demandasInternas.find((demanda) => demanda.id === id);
-    if (!atual) return;
-    const atualizada: Demanda = {
-      ...atual,
-      status,
-      concluidoEm: status === "concluida" ? new Date().toISOString() : null
-    };
-
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(atualizada)
-      });
-      if (!response.ok) {
-        throw new Error("Falha ao atualizar status.");
-      }
-      const payload = await response.json();
-      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? payload : demanda)));
-    } catch {
-      // Fallback local para manter a operacao fluida mesmo sem endpoint disponivel.
-      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === id ? atualizada : demanda)));
-      alert("Status atualizado localmente. A API nao respondeu no momento.");
-    }
-  }
-
-  async function restaurarBackup() {
-    if (!infraOnline) {
-      alert("Servidor ou banco offline. Nao foi possivel iniciar restore.");
-      return;
-    }
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = async () => {
-      const selectedFile = input.files?.[0];
-      if (!selectedFile) return;
-      const file = selectedFile;
-      const confirmar = window.confirm(`Restaurar backup do arquivo ${file.name}? Esta acao substitui dados atuais.`);
-      if (!confirmar) return;
-
-      async function restaurarLocalmente() {
-        const texto = await file.text();
-        const payload = JSON.parse(texto) as {
-          alunos?: Aluno[];
-          escolas?: Escola[];
-          demandas?: Demanda[];
-        };
-
-        setAlunos(Array.isArray(payload.alunos) ? payload.alunos : []);
-        setEscolas(Array.isArray(payload.escolas) ? payload.escolas : []);
-        setDemandasInternas(Array.isArray(payload.demandas) ? payload.demandas : []);
-        setView("menu");
-        alert("Restore local aplicado com sucesso.");
-      }
-
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        const response = await apiFetch(`${apiUrl}/backup/restore`, {
-          method: "POST",
-          body: formData
-        });
-        if (!response.ok) {
-          if (response.status === 404) {
-            await restaurarLocalmente();
-            return;
-          }
-          const erro = await response.text();
-          throw new Error(erro || "Falha ao restaurar backup.");
-        }
-        await Promise.all([listarTodos(), listarEscolas(), carregarDemandas()]);
-        alert("Restore concluido com sucesso.");
-      } catch (error) {
-        try {
-          await restaurarLocalmente();
-        } catch {
-          const mensagem = error instanceof Error ? error.message : "Falha ao restaurar backup.";
-          alert(mensagem);
-        }
-      }
-    };
-    input.click();
-  }
-
-  async function removerDemanda(id: number) {
-    const confirmar = window.confirm("Deseja apagar esta tarefa?");
-    if (!confirmar) return;
-    const alvo = demandasInternas.find((demanda) => demanda.id === id) || null;
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas/${id}`, { method: "DELETE" });
-      if (!response.ok) {
-        throw new Error("Falha ao apagar tarefa.");
-      }
-      setDemandasInternas((demandas) => demandas.filter((demanda) => demanda.id !== id));
-      setDemandaRemovida(alvo);
-      setDemandaSelecionadaId((atual) => (atual === id ? null : atual));
-    } catch {
-      alert("Nao foi possivel apagar a tarefa.");
-    }
-  }
-
-  async function desfazerRemocaoDemanda() {
-    if (!demandaRemovida) return;
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...demandaRemovida, id: undefined })
-      });
-      if (!response.ok) {
-        throw new Error("Falha ao desfazer remocao.");
-      }
-      const criada = await response.json();
-      setDemandasInternas((demandas) => [criada, ...demandas]);
-      setDemandaRemovida(null);
-    } catch {
-      alert("Nao foi possivel desfazer a remocao.");
-    }
-  }
-
-  function salvarUsuarioSistema() {
-    const nome = novoUsuarioForm.nome.trim();
-    const email = novoUsuarioForm.email.trim();
-    if (!nome || !email) {
-      alert("Informe nome e e-mail do usuário.");
-      return;
-    }
-
-    const existe = usuariosCadastrados.some((usuario) => usuario.email.toLowerCase() === email.toLowerCase());
-    if (existe) {
-      alert("Já existe um usuário com este e-mail.");
-      return;
-    }
-
-    const novoUsuario: UsuarioSistema = {
-      id: Date.now(),
-      nome,
-      email,
-      perfil: novoUsuarioForm.perfil
-    };
-    setUsuariosCadastrados((usuarios) => [novoUsuario, ...usuarios]);
-    setNovoUsuarioForm({ nome: "", email: "", perfil: "Administrador" });
-    alert("Usuário cadastrado no módulo.");
-  }
-
-  async function salvarDemanda() {
-    if (!infraOnline) {
-      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
-      return;
-    }
-
-    const titulo = novaDemandaForm.titulo.trim();
-    if (!titulo) {
-      alert("Informe a descrição da demanda.");
-      return;
-    }
-    if (!novaDemandaForm.responsavelId) {
-      setErroResponsavelDemanda(true);
-      alert("Selecione um responsável cadastrado.");
-      return;
-    }
-    setErroResponsavelDemanda(false);
-
-    const responsavel = usuariosCadastrados.find((usuario) => usuario.id.toString() === novaDemandaForm.responsavelId);
-    if (!responsavel) {
-      alert("Responsável não encontrado.");
-      return;
-    }
-
-    const demanda: Omit<Demanda, "id"> = {
-      titulo,
-      aluno: novaDemandaForm.aluno || "Aluno",
-      departamento: novaDemandaForm.departamento,
-      responsavel: responsavel.nome,
-      prazo: new Date().toISOString().slice(0, 10),
-      criadoEm: new Date().toISOString(),
-      concluidoEm: null,
-      comentarios: novaDemandaForm.comentario.trim() ? [novaDemandaForm.comentario.trim()] : [],
-      anexos: [],
-      prioridade: novaDemandaForm.prioridade,
-      status: "aberta"
-    };
-
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(demanda)
-      });
-      if (!response.ok) {
-        throw new Error("Falha ao salvar demanda.");
-      }
-      const criada = await response.json();
-      setDemandasInternas((demandas) => [criada, ...demandas]);
-      setDepartamentoAtivo("todos");
-      setTarefaBusca("");
-      setTarefaFiltroResponsavel("todos");
-      setTarefaFiltroPrioridade("todas");
-      setTarefaFiltroPrazo("todos");
-      setTarefaDetalheId(criada.id);
-      setNovaDemandaForm({
-        titulo: "",
-        aluno: "",
-        departamento: "Financeiro",
-        responsavelId: "",
-        prioridade: "media",
-        comentario: ""
-      });
-      alert("Demanda criada.");
-    } catch {
-      alert("Nao foi possivel salvar a demanda.");
-    }
-  }
-
-  async function adicionarComentarioDemanda() {
-    const comentario = comentarioDemanda.trim();
-    if (!demandaSelecionadaId || !comentario) return;
-    const alvo = demandasInternas.find((demanda) => demanda.id === demandaSelecionadaId);
-    if (!alvo) return;
-    const atualizada: Demanda = { ...alvo, comentarios: [...alvo.comentarios, comentario] };
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas/${alvo.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(atualizada)
-      });
-      if (!response.ok) {
-        throw new Error("Falha ao comentar demanda.");
-      }
-      const payload = await response.json();
-      setDemandasInternas((demandas) => demandas.map((demanda) => (demanda.id === payload.id ? payload : demanda)));
-      setComentarioDemanda("");
-    } catch {
-      alert("Nao foi possivel adicionar o comentario.");
-    }
-  }
-
-  function atualizarStatusParcela(alunoId: number, status: string) {
-    setStatusParcelaOverride((prev) => ({ ...prev, [alunoId]: status }));
-  }
-
-  function atualizarStatusAlunoLocal(alunoId: number, status: string) {
-    setAlunos((lista) => lista.map((aluno) => (aluno.id === alunoId ? { ...aluno, status } : aluno)));
+    window.localStorage.removeItem("tr_usuario");
+    setUsuarioLogado(null);
+    setView("menu");
   }
 
   function resetAlunoForm() {
-    setAlunoForm({ nome: "", nomeResponsavel: "", telefoneResponsavel: "", telefone: "", escolaId: "", escola: "", turma: "", formaPagamento: "", parcelas: "", baile: false, kitFormatura: false, placaHomenagem: false, quantidadePlacaHomenagem: "1", placaReplica: false, quantidadePlacaReplica: "1" });
+    setAlunoForm({ nome: "", nomeResponsavel: "", telefoneResponsavel: "", telefone: "", escolaId: "", escola: "", turma: "", parcelas: "", baile: false, kitFormatura: false, placaHomenagem: false, quantidadePlacaHomenagem: "1", placaReplica: false, quantidadePlacaReplica: "1" });
     setAlunoEditando(null);
   }
 
@@ -746,6 +356,17 @@ export default function Home() {
     if (!data) return "-";
     const [ano, mes, dia] = data.split("-");
     return ano && mes && dia ? `${dia}/${mes}/${ano}` : data;
+  }
+
+  function resetCobrancaForm() {
+    setCobrancaForm({
+      alunoId: "",
+      status: "AGUARDANDO_RESPOSTA",
+      observacao: "",
+      dataCobranca: dataISO(),
+      dataLembrete: dataISO(15)
+    });
+    setCobrancaEditando(null);
   }
 
   function formatarMes(mesAno?: string) {
@@ -776,11 +397,6 @@ export default function Home() {
   }
 
   async function salvarAluno() {
-    if (!infraOnline) {
-      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
-      return;
-    }
-
     if (!escolaSelecionada) {
       alert("Cadastre e selecione uma escola antes de cadastrar o aluno.");
       return;
@@ -808,7 +424,7 @@ export default function Home() {
     };
     delete (dataToSave as Record<string, unknown>).escolaId;
 
-    const response = await apiFetch(alunoEditando ? `${apiUrl}/alunos/${alunoEditando.id}` : `${apiUrl}/alunos`, {
+    const response = await authFetch(alunoEditando ? `${apiUrl}/alunos/${alunoEditando.id}` : `${apiUrl}/alunos`, {
       method: alunoEditando ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(dataToSave)
@@ -824,11 +440,6 @@ export default function Home() {
   }
 
   async function salvarEscola() {
-    if (!infraOnline) {
-      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
-      return;
-    }
-
     if (!escolaForm.nomeEscola) {
       alert("Informe o nome da escola.");
       return;
@@ -850,7 +461,7 @@ export default function Home() {
       valorPlacaHomenagem: parseMoney(escolaForm.valorPlacaHomenagem)
     };
 
-    const response = await apiFetch(escolaEditando ? `${apiUrl}/escolas/${escolaEditando.id}` : `${apiUrl}/escolas`, {
+    const response = await authFetch(escolaEditando ? `${apiUrl}/escolas/${escolaEditando.id}` : `${apiUrl}/escolas`, {
       method: escolaEditando ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(dataToSave)
@@ -874,13 +485,13 @@ export default function Home() {
       alert("Preencha nome do aluno, responsavel ou escola para pesquisar.");
       return;
     }
-    const response = await apiFetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
+    const response = await authFetch(`${apiUrl}/alunos${params.toString() ? `?${params.toString()}` : ""}`);
     setAlunos(await response.json());
     setResultadoBuscaVisivel(true);
   }
 
   async function listarTodos() {
-    const response = await apiFetch(`${apiUrl}/alunos`);
+    const response = await authFetch(`${apiUrl}/alunos`);
     setAlunos(await response.json());
   }
 
@@ -897,108 +508,169 @@ export default function Home() {
   }
 
   async function listarEscolas() {
-    const response = await apiFetch(`${apiUrl}/escolas`);
+    const response = await authFetch(`${apiUrl}/escolas`);
     setEscolas(await response.json());
   }
 
-  async function carregarDemandas() {
-    try {
-      const response = await apiFetch(`${apiUrl}/demandas`);
-      if (!response.ok) return;
-      const payload = await response.json();
-      setDemandasInternas(Array.isArray(payload) ? payload : []);
-    } catch {
-      setDemandasInternas([]);
+  async function listarCobrancas() {
+    const response = await authFetch(`${apiUrl}/cobrancas`);
+    if (!response.ok) {
+      alert("Nao foi possivel carregar as cobrancas.");
+      return;
     }
+    setCobrancas(await response.json());
   }
 
-  async function carregarPagamentosSistema() {
-    try {
-      const response = await apiFetch(`${apiUrl}/pagamentos`);
-      if (!response.ok) return;
-      const payload = await response.json();
-      setPagamentosSistema(Array.isArray(payload) ? payload : []);
-    } catch {
-      setPagamentosSistema([]);
-    }
-  }
-
-  async function carregarSaudeInfra() {
-    try {
-      const response = await fetch(`${apiUrl}/health`);
-      if (!response.ok) {
-        setHealthStatus({ serverOnline: false, databaseOnline: false, checked: true });
-        return;
-      }
-
-      const data = await response.json();
-      setHealthStatus({
-        serverOnline: Boolean(data.serverOnline),
-        databaseOnline: Boolean(data.databaseOnline),
-        checked: true
-      });
-    } catch {
-      setHealthStatus({ serverOnline: false, databaseOnline: false, checked: true });
-    }
-  }
-
-  useEffect(() => {
-    if (!authHeader) return;
-
-    const bootstrap = window.setTimeout(() => {
-      void listarTodos();
-      void listarEscolas();
-      void carregarDemandas();
-      void carregarPagamentosSistema();
-    }, 0);
-    const initialHealthCheck = window.setTimeout(() => {
-      void carregarSaudeInfra();
-    }, 0);
-
-    const interval = window.setInterval(() => {
-      void carregarSaudeInfra();
-    }, 30000);
-
-    return () => {
-      window.clearTimeout(bootstrap);
-      window.clearTimeout(initialHealthCheck);
-      window.clearInterval(interval);
-    };
-  }, [authHeader]);
-
-  async function buscarAlunoFinanceiro() {
-    const params = new URLSearchParams();
-    if (financeiroBusca.nome.trim()) params.append("nome", financeiroBusca.nome.trim());
-    if (financeiroBusca.responsavel.trim()) params.append("responsavel", financeiroBusca.responsavel.trim());
-    if (financeiroBusca.escola.trim()) params.append("escola", financeiroBusca.escola.trim());
-
-    if (!params.toString()) {
-      alert("Preencha nome do aluno, responsavel ou escola para buscar.");
+  async function salvarCobranca() {
+    if (!cobrancaForm.alunoId) {
+      alert("Selecione o aluno cobrado.");
       return;
     }
 
-    setFinanceiroBuscaRealizada(true);
-    try {
-      const response = await apiFetch(`${apiUrl}/alunos?${params.toString()}`);
-      if (response.ok) {
-        setFinanceiroResultados(await response.json());
-        return;
-      }
-    } catch {
-      // Usa a lista local caso a API esteja indisponivel.
+    const dataToSave = {
+      alunoId: parseInt(cobrancaForm.alunoId),
+      status: cobrancaForm.status,
+      observacao: cobrancaForm.observacao,
+      dataCobranca: cobrancaForm.dataCobranca,
+      dataLembrete: cobrancaForm.status === "RESOLVIDO" ? null : cobrancaForm.dataLembrete
+    };
+
+    const response = await authFetch(cobrancaEditando ? `${apiUrl}/cobrancas/${cobrancaEditando.id}` : `${apiUrl}/cobrancas`, {
+      method: cobrancaEditando ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      body: JSON.stringify(dataToSave)
+    });
+
+    if (!response.ok) {
+      alert(cobrancaEditando ? "Nao foi possivel editar a cobranca." : "Nao foi possivel registrar a cobranca.");
+      return;
     }
 
-    const nome = financeiroBusca.nome.trim().toLowerCase();
-    const responsavel = financeiroBusca.responsavel.trim().toLowerCase();
-    const escola = financeiroBusca.escola.trim().toLowerCase();
-    setFinanceiroResultados(
-      alunos.filter((aluno) => {
-        const nomeOk = !nome || (aluno.nome || "").toLowerCase().includes(nome);
-        const responsavelOk = !responsavel || (aluno.nomeResponsavel || "").toLowerCase().includes(responsavel);
-        const escolaOk = !escola || (aluno.escola || "").toLowerCase().includes(escola);
-        return nomeOk && responsavelOk && escolaOk;
+    alert(cobrancaEditando ? "Cobranca atualizada!" : "Cobranca registrada!");
+    resetCobrancaForm();
+    listarCobrancas();
+  }
+
+  function editarCobranca(cobranca: Cobranca) {
+    setCobrancaEditando(cobranca);
+    setCobrancaForm({
+      alunoId: cobranca.alunoId.toString(),
+      status: cobranca.status,
+      observacao: cobranca.observacao || "",
+      dataCobranca: cobranca.dataCobranca || dataISO(),
+      dataLembrete: cobranca.dataLembrete || dataISO(15)
+    });
+    setView("cobrancas");
+  }
+
+  async function atualizarStatusCobranca(cobranca: Cobranca, status: CobrancaStatus) {
+    const response = await authFetch(`${apiUrl}/cobrancas/${cobranca.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      body: JSON.stringify({
+        alunoId: cobranca.alunoId,
+        status,
+        observacao: cobranca.observacao || "",
+        dataCobranca: cobranca.dataCobranca || dataISO(),
+        dataLembrete: status === "COBRAR_NOVAMENTE_15_DIAS" ? dataISO(15) : cobranca.dataLembrete
       })
-    );
+    });
+
+    if (!response.ok) {
+      alert("Nao foi possivel atualizar a cobranca.");
+      return;
+    }
+
+    listarCobrancas();
+  }
+
+  async function comentarCobranca(cobranca: Cobranca) {
+    const comentario = comentariosCobranca[cobranca.id]?.trim();
+    if (!comentario) {
+      alert("Digite um comentario para salvar.");
+      return;
+    }
+
+    const observacaoAtualizada = cobranca.observacao
+      ? `${cobranca.observacao}\n\n${comentario}`
+      : comentario;
+
+    const response = await authFetch(`${apiUrl}/cobrancas/${cobranca.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      body: JSON.stringify({
+        alunoId: cobranca.alunoId,
+        status: cobranca.status,
+        observacao: observacaoAtualizada,
+        dataCobranca: cobranca.dataCobranca || dataISO(),
+        dataLembrete: cobranca.dataLembrete
+      })
+    });
+
+    if (!response.ok) {
+      alert("Nao foi possivel adicionar o comentario.");
+      return;
+    }
+
+    setComentariosCobranca({ ...comentariosCobranca, [cobranca.id]: "" });
+    listarCobrancas();
+  }
+
+  async function excluirCobranca(cobrancaId: number) {
+    if (!window.confirm("Deseja realmente excluir esta cobranca?")) return;
+
+    const response = await authFetch(`${apiUrl}/cobrancas/${cobrancaId}`, { method: "DELETE" });
+    if (!response.ok) {
+      alert("Nao foi possivel excluir a cobranca.");
+      return;
+    }
+
+    if (cobrancaEditando?.id === cobrancaId) resetCobrancaForm();
+    listarCobrancas();
+  }
+
+  async function carregarManutencao() {
+    const response = await authFetch(`${apiUrl}/manutencao/status`);
+    if (!response.ok) return;
+    setManutencaoStatus(await response.json());
+  }
+
+  async function baixarBackup() {
+    const response = await authFetch(`${apiUrl}/manutencao/backup`);
+    if (!response.ok) {
+      alert("Nao foi possivel gerar o backup.");
+      return;
+    }
+    const backup = await response.json();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tr-backup-${dataISO()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function restaurarBackup(file?: File) {
+    if (!file) return;
+    if (!window.confirm("Restaurar backup substitui alunos, escolas, pagamentos, cobrancas e comissoes atuais. Deseja continuar?")) return;
+
+    const texto = await file.text();
+    const response = await authFetch(`${apiUrl}/manutencao/restaurar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      body: texto
+    });
+    if (!response.ok) {
+      alert("Nao foi possivel restaurar o backup.");
+      return;
+    }
+
+    alert("Backup restaurado!");
+    listarTodos();
+    listarEscolas();
+    listarCobrancas();
+    carregarManutencao();
   }
 
   async function abrirComissao() {
@@ -1012,7 +684,7 @@ export default function Home() {
       return;
     }
 
-    const response = await apiFetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
+    const response = await authFetch(`${apiUrl}/comissao-formatura/escola/${escolaId}`);
     if (!response.ok) {
       alert("Nao foi possivel consultar a comissao desta escola.");
       return;
@@ -1025,7 +697,7 @@ export default function Home() {
     setAlunoFinanceiro(null);
     setComissaoAlunoDetalhe(null);
 
-    const response = await apiFetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
+    const response = await authFetch(`${apiUrl}/comissao-formatura/aluno/${aluno.id}`);
     if (!response.ok) return;
 
     const comissoes = await response.json();
@@ -1045,26 +717,19 @@ export default function Home() {
   }
 
   async function abrirFinanceiroAluno(aluno: Aluno) {
-    selecionarAlunoParaPagamento(aluno);
     setAlunoFinanceiro(aluno);
     setPagamentosFinanceiro([]);
-    setView("financeiro");
-    window.scrollTo({ top: 0, behavior: "smooth" });
 
-    try {
-      const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
-      if (!response.ok) {
-        alert("Nao foi possivel carregar os pagamentos deste aluno. O resumo do contrato foi aberto mesmo assim.");
-        return;
-      }
-
-      const pagamentosAluno: Pagamento[] = await response.json();
-      setPagamentosFinanceiro(
-        pagamentosAluno.sort((a, b) => Number(a.numeroParcela || a.id || 0) - Number(b.numeroParcela || b.id || 0))
-      );
-    } catch {
-      alert("Nao foi possivel conectar ao servidor de pagamentos. O resumo do contrato foi aberto mesmo assim.");
+    const response = await authFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+    if (!response.ok) {
+      alert("Nao foi possivel carregar o financeiro deste aluno.");
+      return;
     }
+
+    const pagamentosAluno: Pagamento[] = await response.json();
+    setPagamentosFinanceiro(
+      pagamentosAluno.sort((a, b) => Number(a.numeroParcela || a.id || 0) - Number(b.numeroParcela || b.id || 0))
+    );
   }
 
   function fecharFinanceiroAluno() {
@@ -1085,7 +750,6 @@ export default function Home() {
       escolaId: escolaDoAluno?.id.toString() || "",
       escola: aluno.escola || "",
       turma: aluno.turma || "",
-      formaPagamento: aluno.formaPagamento || "",
       parcelas: aluno.parcelas ? aluno.parcelas.toString() : "",
       baile: Boolean(aluno.baile),
       kitFormatura: Boolean(aluno.kitFormatura),
@@ -1120,17 +784,12 @@ export default function Home() {
   }
 
   async function salvarComissao() {
-    if (!infraOnline) {
-      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
-      return;
-    }
-
     if (!comissaoForm.escolaId || !comissaoForm.alunoId) {
       alert("Selecione a escola e o aluno da comissao.");
       return;
     }
 
-    const response = await apiFetch(`${apiUrl}/comissao-formatura`, {
+    const response = await authFetch(`${apiUrl}/comissao-formatura`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1152,7 +811,7 @@ export default function Home() {
   async function excluirAluno(alunoId: number) {
     if (!window.confirm("Deseja realmente excluir este cadastro?")) return;
 
-    const response = await apiFetch(`${apiUrl}/alunos/${alunoId}`, { method: "DELETE" });
+    const response = await authFetch(`${apiUrl}/alunos/${alunoId}`, { method: "DELETE" });
     if (!response.ok) {
       alert("Nao foi possivel excluir este cadastro.");
       return;
@@ -1162,22 +821,13 @@ export default function Home() {
       setAlunoSelecionado(null);
       setPagamentos([]);
     }
-    if (alunoDetalhe?.id === alunoId) {
-      setAlunoDetalhe(null);
-      setComissaoAlunoDetalhe(null);
-    }
-    if (alunoFinanceiro?.id === alunoId) {
-      setAlunoFinanceiro(null);
-      setPagamentosFinanceiro([]);
-    }
-    setAlunos((lista) => lista.filter((aluno) => aluno.id !== alunoId));
     listarTodos();
   }
 
   async function excluirEscola(escolaId: number) {
     if (!window.confirm("Deseja realmente excluir esta escola?")) return;
 
-    const response = await apiFetch(`${apiUrl}/escolas/${escolaId}`, { method: "DELETE" });
+    const response = await authFetch(`${apiUrl}/escolas/${escolaId}`, { method: "DELETE" });
     if (!response.ok) {
       alert("Nao foi possivel excluir esta escola.");
       return;
@@ -1204,12 +854,12 @@ export default function Home() {
   }
 
   async function carregarPagamentos(alunoId: number) {
-    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
+    const response = await authFetch(`${apiUrl}/pagamentos/aluno/${alunoId}`);
     setPagamentos(await response.json());
   }
 
   async function abrirUltimoReciboAluno(aluno: Aluno) {
-    const response = await apiFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
+    const response = await authFetch(`${apiUrl}/pagamentos/aluno/${aluno.id}`);
     if (!response.ok) {
       alert("Nao foi possivel carregar os pagamentos deste aluno.");
       return;
@@ -1226,11 +876,6 @@ export default function Home() {
   }
 
   async function registrarPagamento() {
-    if (!infraOnline) {
-      alert("Nao foi possivel salvar. Servidor ou banco de dados offline.");
-      return;
-    }
-
     if (!pagamento.valor || !pagamento.alunoId) {
       alert("Preencha o valor do pagamento.");
       return;
@@ -1242,7 +887,7 @@ export default function Home() {
       numeroParcela: numeroParcela ? parseInt(numeroParcela) : 0,
       descricao: ""
     };
-    const response = await apiFetch(`${apiUrl}/pagamentos`, {
+    const response = await authFetch(`${apiUrl}/pagamentos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data)
@@ -1260,7 +905,7 @@ export default function Home() {
 
     if (alunoSelecionado) {
       carregarPagamentos(alunoSelecionado.id);
-      const alunoResponse = await apiFetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
+      const alunoResponse = await authFetch(`${apiUrl}/alunos?nome=${encodeURIComponent(alunoSelecionado.nome)}`);
       const updatedAlunos = await alunoResponse.json();
       const atualizado = updatedAlunos.find((aluno: Aluno) => aluno.id === alunoSelecionado.id) || updatedAlunos[0];
       if (atualizado) setAlunoSelecionado(atualizado);
@@ -1320,18 +965,9 @@ export default function Home() {
   function abrirResumoFinanceiro(alunoResumo: Aluno) {
     const escolaResumo = buscarEscolaDoAluno(alunoResumo);
     const servicos = servicosDoAluno(alunoResumo);
-    const formaPagamentoTexto = alunoResumo.formaPagamento || "Nao informada";
-    const parcelasTexto = alunoResumo.parcelas ? alunoResumo.parcelas.toString() : "0";
-    const valorMensalTexto = moeda(alunoResumo.valorMensal);
-    const itensContratoTexto = servicos.length
-      ? servicos
-          .map((servico) => `${servico.nome} x${servico.quantidade}: ${moeda(servico.valorUnitario * servico.quantidade)}`)
-          .join("; ")
-      : "Nenhum item marcado";
-    const textoResumoFinanceiro = `Itens fechados no contrato: ${itensContratoTexto}. Forma de pagamento: ${formaPagamentoTexto}. Valor da parcela mensal: ${valorMensalTexto}. Numero de parcelas: ${parcelasTexto}. Valor total do contrato: ${moeda(alunoResumo.valorContrato)}. Valor restante: ${moeda(alunoResumo.valorRestanteContrato ?? alunoResumo.valorContrato)}.`;
     const whatsappResumo = linkWhatsApp(
       alunoResumo.telefone,
-      `Ola, ${alunoResumo.nomeResponsavel || ""}. Segue o resumo financeiro do contrato do(a) aluno(a) ${alunoResumo.nome}. ${textoResumoFinanceiro}`
+      `Olá, ${alunoResumo.nomeResponsavel || ""}. Segue o resumo financeiro do contrato do(a) aluno(a) ${alunoResumo.nome}. Valor total: ${moeda(alunoResumo.valorContrato)}. Valor restante: ${moeda(alunoResumo.valorRestanteContrato ?? alunoResumo.valorContrato)}.`
     );
     const linhasServicos = servicos.length
       ? servicos.map((servico) => `
@@ -1373,13 +1009,8 @@ export default function Home() {
       <div><div class="label">Turma</div><div class="value">${alunoResumo.turma || "-"}</div></div>
       <div><div class="label">Data do baile</div><div class="value">${formatarData(escolaResumo?.dataBaileFormatura)}</div></div>
       <div><div class="label">Inicio do pagamento</div><div class="value">${formatarMes(escolaResumo?.mesInicioPagamento)}</div></div>
-      <div><div class="label">Forma de pagamento</div><div class="value">${formaPagamentoTexto}</div></div>
-      <div><div class="label">Valor da parcela mensal</div><div class="value">${valorMensalTexto}</div></div>
-      <div><div class="label">Numero de parcelas</div><div class="value">${parcelasTexto}</div></div>
       <div><div class="label">Senhas do contrato</div><div class="value">${escolaResumo?.quantidadeConvitesContrato ?? 0}</div></div>
     </div>
-    <div class="label">Texto do resumo financeiro</div>
-    <div class="value">${textoResumoFinanceiro}</div>
     <div class="label">Servicos marcados em contrato</div>
     <table>
       <thead>
@@ -1480,154 +1111,259 @@ export default function Home() {
     }
   }
 
-  function menuInicial() {
-    const inadimplentes = alunos.filter(alunoEstaInadimplente).length;
-    const demandas = [
-      { titulo: "Aluno pediu segunda via do contrato", aluno: alunos[0]?.nome || "Aluno", departamento: "Contratos", prioridade: "media", status: "aberta" },
-      { titulo: "Aluno enviou comprovante", aluno: alunos[1]?.nome || alunos[0]?.nome || "Aluno", departamento: "Financeiro", prioridade: "alta", status: "em andamento" },
-      { titulo: "Aluno pediu cancelamento", aluno: alunos[2]?.nome || alunos[0]?.nome || "Aluno", departamento: "Distratos", prioridade: "urgente", status: "aberta" }
-    ];
-    const prioridadeClasse: Record<string, string> = {
-      media: "bg-sky-100 text-sky-800",
-      alta: "bg-amber-100 text-amber-800",
-      urgente: "bg-rose-100 text-rose-800"
-    };
-
+  function controleCobrancas() {
     return (
-      <section className="space-y-7">
-        <div className="grid gap-5 xl:grid-cols-3">
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
+      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-950">{cobrancaEditando ? "Editar cobranca" : "Nova cobranca"}</h2>
+              <p className="mt-2 text-slate-600">Registre o contato, o retorno recebido e a data para cobrar novamente.</p>
+            </div>
+            <button type="button" onClick={() => { resetCobrancaForm(); setView("menu"); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
           </div>
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-rose-700">Inadimplentes</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{inadimplentes}</p>
-          </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">Turmas/Eventos</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
+
+          <div className="mt-6 grid gap-4">
+            <select value={cobrancaForm.alunoId} onChange={(e) => setCobrancaForm({ ...cobrancaForm, alunoId: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
+              <option value="">Selecione o aluno cobrado</option>
+              {alunosFiltradosOrdenados.map((aluno) => (
+                <option key={aluno.id} value={aluno.id}>{aluno.nome} {aluno.escola ? `- ${aluno.escola}` : ""}</option>
+              ))}
+            </select>
+
+            <select value={cobrancaForm.status} onChange={(e) => {
+              const status = e.target.value as CobrancaStatus;
+              setCobrancaForm({
+                ...cobrancaForm,
+                status,
+                dataLembrete: status === "RESOLVIDO" ? "" : status === "COBRAR_NOVAMENTE_15_DIAS" ? dataISO(15) : cobrancaForm.dataLembrete
+              });
+            }} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
+              {cobrancaStatusOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                Data da cobranca
+                <input type="date" value={cobrancaForm.dataCobranca} onChange={(e) => setCobrancaForm({ ...cobrancaForm, dataCobranca: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200" />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                Lembrar novamente
+                <input type="date" value={cobrancaForm.dataLembrete} disabled={cobrancaForm.status === "RESOLVIDO"} onChange={(e) => setCobrancaForm({ ...cobrancaForm, dataLembrete: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 disabled:bg-slate-100" />
+              </label>
+            </div>
+
+            <textarea rows={6} placeholder="Observacao sobre o retorno da cobranca" value={cobrancaForm.observacao} onChange={(e) => setCobrancaForm({ ...cobrancaForm, observacao: e.target.value })} className="resize-none rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200" />
+
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={salvarCobranca} className="rounded-3xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-violet-700">{cobrancaEditando ? "Atualizar cobranca" : "Salvar cobranca"}</button>
+              {cobrancaEditando && (
+                <button type="button" onClick={resetCobrancaForm} className="rounded-3xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
-            <h2 className="text-2xl font-semibold text-slate-950">Demandas recentes</h2>
-            <div className="mt-6 space-y-4">
-              {demandas.map((demanda) => (
-                <div key={demanda.titulo} className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-xl font-semibold text-slate-950">{demanda.titulo}</p>
-                    <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} · {demanda.departamento}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                    <select value={demanda.status} onChange={(e) => atualizarStatusDemanda((demanda as Demanda & { id?: number }).id || 0, e.target.value)} disabled={!((demanda as Demanda & { id?: number }).id)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-lg text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-100">
-                      <option value="aberta">aberta</option>
-                      <option value="em andamento">em andamento</option>
-                      <option value="aguardando">aguardando</option>
-                      <option value="concluida">concluida</option>
-                    </select>
-                  </div>
-                </div>
-              ))}
+        <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950">Demandas recentes</h2>
+              <p className="mt-1 text-sm text-slate-500">{cobrancasFiltradas.length} registros encontrados.</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <select value={cobrancaFiltroStatus} onChange={(e) => setCobrancaFiltroStatus(e.target.value)} className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
+                <option value="">Todos os status</option>
+                {cobrancaStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <button type="button" onClick={listarCobrancas} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Atualizar</button>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
-            <h2 className="text-2xl font-semibold text-slate-950">Mapa de departamentos</h2>
-            <div className="mt-6 space-y-4">
-              {[
-                ["Financeiro", "1 abertas"],
-                ["Atendimento", "0 abertas"],
-                ["Contratos", "1 abertas"],
-                ["Eventos", "0 abertas"],
-                ["Distratos", "1 abertas"],
-                ["Administracao", "0 abertas"]
-              ].map(([departamento, abertas]) => (
-                <div key={departamento} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-xl font-semibold text-slate-950">{departamento}</p>
-                  <span className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#08265f]">{abertas}</span>
-                </div>
-              ))}
-            </div>
+          <div className="space-y-4 p-6">
+            {cobrancasFiltradas.length > 0 ? (
+              cobrancasFiltradas.map((cobranca) => (
+                <article key={cobranca.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <h3 className="text-xl font-semibold text-slate-950">Cobranca</h3>
+                      <p className="mt-3 text-sky-800">{cobranca.nomeAluno || "Aluno"} - Financeiro</p>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {cobranca.nomeResponsavel || "-"} {cobranca.telefoneResponsavel ? `- ${cobranca.telefoneResponsavel}` : ""}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Cobrado em {formatarData(cobranca.dataCobranca)} {cobranca.dataLembrete ? `- lembrar em ${formatarData(cobranca.dataLembrete)}` : ""}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Criado por {cobranca.criadoPor || "Sistema"} {cobranca.criadoEm ? `em ${new Date(cobranca.criadoEm).toLocaleString("pt-BR")}` : ""}
+                      </p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Ultima alteracao por {cobranca.atualizadoPor || "Sistema"} {cobranca.atualizadoEm ? `em ${new Date(cobranca.atualizadoEm).toLocaleString("pt-BR")}` : ""}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="rounded-2xl bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-800">alta</span>
+                      <select value={cobranca.status} onChange={(e) => atualizarStatusCobranca(cobranca, e.target.value as CobrancaStatus)} className="min-w-48 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
+                        {cobrancaStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => editarCobranca(cobranca)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Editar</button>
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <p className="text-sm font-semibold text-slate-800">Comentarios</p>
+                    <div className="mt-3 whitespace-pre-wrap rounded-2xl bg-white px-5 py-4 text-sm leading-6 text-sky-950">
+                      {cobranca.observacao || "Sem comentarios ainda."}
+                    </div>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto]">
+                      <textarea rows={4} placeholder="Adicionar comentario" value={comentariosCobranca[cobranca.id] || ""} onChange={(e) => setComentariosCobranca({ ...comentariosCobranca, [cobranca.id]: e.target.value })} className="resize-none rounded-2xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200" />
+                      <button type="button" onClick={() => comentarCobranca(cobranca)} className="rounded-2xl bg-slate-950 px-6 py-4 text-sm font-semibold text-white transition hover:bg-slate-800">Comentar</button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => atualizarStatusCobranca(cobranca, "COBRAR_NOVAMENTE_15_DIAS")} className="rounded-2xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-violet-700">Cobrar em 15 dias</button>
+                      <button type="button" onClick={() => atualizarStatusCobranca(cobranca, "RESOLVIDO")} className="rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">Marcar resolvido</button>
+                      <button type="button" onClick={() => excluirCobranca(cobranca.id)} className="rounded-2xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-700">Excluir</button>
+                    </div>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-slate-500">
+                Nenhuma cobranca registrada.
+              </div>
+            )}
           </div>
         </div>
       </section>
     );
   }
 
-  function menuInicialInterativo() {
-    const prioridadeClasse: Record<string, string> = {
-      baixa: "bg-slate-100 text-slate-700",
-      media: "bg-sky-100 text-sky-800",
-      alta: "bg-amber-100 text-amber-800",
-      urgente: "bg-rose-100 text-rose-800"
-    };
-    const departamentosResumo = ["Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administracao"];
-
+  function manutencaoSistema() {
     return (
-      <section className="space-y-7">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
-            <h2 className="text-2xl font-semibold text-slate-950">Demandas recentes</h2>
-            <div className="mt-6 space-y-4">
-              {demandasComAluno.slice(0, 3).map((demanda) => (
-                <div
-                  key={demanda.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setDemandaSelecionadaId(demanda.id)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setDemandaSelecionadaId(demanda.id); }}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-sky-200 hover:bg-white"
-                >
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="text-xl font-semibold text-slate-950">{demanda.titulo}</p>
-                      <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} - {demanda.departamento}</p>
-                    </div>
-                    <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-                      <span className={`rounded-xl px-4 py-3 text-center text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                      <select value={demanda.status} onClick={(e) => e.stopPropagation()} onChange={(e) => atualizarStatusDemanda(demanda.id, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-5 py-3 text-base text-slate-950 sm:w-44">
-                        <option value="aberta">aberta</option>
-                        <option value="em andamento">em andamento</option>
-                        <option value="aguardando">aguardando</option>
-                        <option value="concluida">concluida</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {demandaSelecionadaId === demanda.id && (
-                    <div className="mt-4 border-t border-slate-200 pt-4" onClick={(e) => e.stopPropagation()}>
-                      <p className="text-sm font-semibold text-slate-700">Comentários</p>
-                      <div className="mt-2 space-y-2 text-sm text-[#08265f]">
-                        {demanda.comentarios.map((comentario, index) => (
-                          <p key={`${demanda.id}-${index}`} className="rounded-xl bg-white px-4 py-3">{comentario}</p>
-                        ))}
-                      </div>
-                      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentário" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-                        <button type="button" onClick={adicionarComentarioDemanda} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Comentar</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+      <section className="space-y-6">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Operacao tecnica</p>
+              <h2 className="mt-3 text-4xl font-semibold text-slate-950">Manutencao</h2>
             </div>
+            <button type="button" onClick={() => setView("menu")} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-950">Backup manual</h3>
+          <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+            O backup e salvo no seu computador em JSON. Baixe antes de mudancas grandes e importe o arquivo se precisar recuperar os dados.
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" onClick={baixarBackup} className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Baixar backup JSON</button>
+            <label className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+              Importar backup JSON
+              <input type="file" accept="application/json" onChange={(e) => restaurarBackup(e.target.files?.[0])} className="hidden" />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-xl font-semibold text-slate-950">Manutencao do banco</h3>
+            <button type="button" onClick={carregarManutencao} className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Atualizar</button>
+          </div>
+          <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+            Use para acompanhar o tamanho das tabelas no Supabase e evitar sistema cheio.
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
-            <h2 className="text-2xl font-semibold text-slate-950">Mapa de departamentos</h2>
-            <div className="mt-6 space-y-4">
-              {departamentosResumo.map((departamento) => (
-                <div key={departamento} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-xl font-semibold text-slate-950">{departamento}</p>
-                  <span className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#08265f]">
-                    {demandasInternas.filter((demanda) => demanda.departamento === departamento && demanda.status !== "concluida").length} abertas
-                  </span>
+          {manutencaoStatus && (
+            <>
+              <div className="mt-5 grid gap-4 md:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status de lotacao</p>
+                  <p className="mt-2 text-xl font-semibold text-emerald-700">{manutencaoStatus.statusLotacao}</p>
+                  <p className="mt-1 text-xs text-slate-500">{manutencaoStatus.lembrete}</p>
                 </div>
-              ))}
-            </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Uso estimado</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{manutencaoStatus.usoEstimado}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Registros</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{manutencaoStatus.registros}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Ano selecionado</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{manutencaoStatus.anoSelecionado}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-5 py-4 font-medium">Tabela</th>
+                      <th className="px-5 py-4 font-medium">Linhas</th>
+                      <th className="px-5 py-4 font-medium">Tamanho total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manutencaoStatus.tabelas.map((tabela) => (
+                      <tr key={tabela.tabela} className="border-t border-slate-200">
+                        <td className="px-5 py-4">{tabela.tabela}</td>
+                        <td className="px-5 py-4">{tabela.linhas}</td>
+                        <td className="px-5 py-4">{tabela.tamanhoTotal}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function menuInicial() {
+    return (
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <h2 className="text-2xl font-semibold text-slate-950">Escolha o cadastro</h2>
+        <div className="mt-6 grid gap-4">
+          <div className="rounded-3xl border border-sky-200 bg-sky-50 p-5">
+            <button type="button" onClick={() => { setView("aluno"); listarEscolas(); }} className="w-full rounded-3xl bg-sky-600 p-6 text-left text-white transition hover:bg-sky-700">
+              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-100">Cadastro</span>
+              <span className="mt-3 block text-2xl font-semibold">Aluno</span>
+            </button>
+            <button type="button" onClick={() => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); listarTodos(); listarEscolas(); }} className="mt-4 w-full rounded-3xl border border-sky-200 bg-white px-5 py-4 text-left text-sm font-semibold text-sky-700 transition hover:bg-sky-100">Alunos cadastrados</button>
+          </div>
+
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+            <button type="button" onClick={() => { setView("escola"); listarEscolas(); }} className="w-full rounded-3xl bg-emerald-600 p-6 text-left text-white transition hover:bg-emerald-700">
+              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-100">Cadastro</span>
+              <span className="mt-3 block text-2xl font-semibold">Escola</span>
+            </button>
+            <button type="button" onClick={() => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); }} className="mt-4 w-full rounded-3xl border border-emerald-200 bg-white px-5 py-4 text-left text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100">Escolas cadastradas</button>
+          </div>
+
+          <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
+            <button type="button" onClick={() => { setView("cobrancas"); listarTodos(); listarCobrancas(); }} className="w-full rounded-3xl bg-violet-600 p-6 text-left text-white transition hover:bg-violet-700">
+              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-100">Financeiro</span>
+              <span className="mt-3 block text-2xl font-semibold">Cobrancas</span>
+            </button>
+            <p className="mt-4 rounded-3xl border border-violet-200 bg-white px-5 py-4 text-sm font-semibold text-violet-700">{indicadores.cobrancasPendentes} cobrancas pendentes</p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <button type="button" onClick={() => { setView("manutencao"); carregarManutencao(); }} className="w-full rounded-3xl bg-slate-950 p-6 text-left text-white transition hover:bg-slate-800">
+              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Sistema</span>
+              <span className="mt-3 block text-2xl font-semibold">Manutencao</span>
+            </button>
+            <p className="mt-4 rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm font-semibold text-slate-700">Backups, restauracao e tamanho do banco</p>
           </div>
         </div>
       </section>
@@ -1648,7 +1384,7 @@ export default function Home() {
           <button type="button" onClick={fecharFinanceiroAluno} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Fechar financeiro</button>
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-4">
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Valor total</p>
             <p className="mt-2 text-xl font-semibold text-slate-950">{moeda(alunoFinanceiro.valorContrato)}</p>
@@ -1660,10 +1396,6 @@ export default function Home() {
           <div className="rounded-3xl bg-white p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Falta quitar</p>
             <p className="mt-2 text-xl font-semibold text-slate-950">{moeda(alunoFinanceiro.valorRestanteContrato ?? alunoFinanceiro.valorContrato)}</p>
-          </div>
-          <div className="rounded-3xl bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Forma de pagamento</p>
-            <p className="mt-2 text-xl font-semibold text-slate-950">{alunoFinanceiro.formaPagamento || "-"}</p>
           </div>
         </div>
 
@@ -1787,10 +1519,7 @@ export default function Home() {
             <h2 className="text-2xl font-semibold text-slate-950">Alunos cadastrados</h2>
             <p className="mt-2 text-slate-600">Selecione um aluno para abrir todos os dados do cadastro.</p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button type="button" onClick={() => { setAlunoSelecionado(null); setView("aluno"); listarEscolas(); }} className="rounded-3xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Cadastrar aluno</button>
-            <button type="button" onClick={() => { setView("menu"); setAlunoDetalhe(null); setComissaoAlunoDetalhe(null); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
-          </div>
+          <button type="button" onClick={() => { setView("menu"); setAlunoDetalhe(null); setComissaoAlunoDetalhe(null); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
         </div>
 
         {alunoDetalhe ? (
@@ -1803,7 +1532,6 @@ export default function Home() {
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={() => editarAluno(alunoDetalhe)} className="rounded-3xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Editar cadastro</button>
                 <button type="button" onClick={() => abrirFinanceiroAluno(alunoDetalhe)} className="rounded-3xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Financeiro</button>
-                <button type="button" onClick={() => excluirAluno(alunoDetalhe.id)} className="rounded-3xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700">Excluir cadastro</button>
                 <button type="button" onClick={() => { setAlunoDetalhe(null); setComissaoAlunoDetalhe(null); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Ver lista</button>
               </div>
             </div>
@@ -1851,10 +1579,6 @@ export default function Home() {
                 <p className="mt-2 text-lg font-semibold text-slate-950">{alunoDetalhe.parcelas || 0}</p>
               </div>
               <div className="rounded-3xl bg-slate-50 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Forma de pagamento</p>
-                <p className="mt-2 text-lg font-semibold text-slate-950">{alunoDetalhe.formaPagamento || "-"}</p>
-              </div>
-              <div className="rounded-3xl bg-slate-50 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Valor mensal</p>
                 <p className="mt-2 text-lg font-semibold text-slate-950">{moeda(alunoDetalhe.valorMensal)}</p>
               </div>
@@ -1890,106 +1614,55 @@ export default function Home() {
           </div>
         ) : (
           <div className="mt-8 space-y-5">
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-                <input
-                  value={search.nome}
-                  onChange={(e) => setSearch({ ...search, nome: e.target.value })}
-                  placeholder="Nome do aluno"
-                  className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                />
-                <input
-                  value={search.responsavel}
-                  onChange={(e) => setSearch({ ...search, responsavel: e.target.value })}
-                  placeholder="Nome do responsavel"
-                  className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                />
-                <select
-                  value={search.escola}
-                  onChange={(e) => setSearch({ ...search, escola: e.target.value })}
-                  className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                >
-                  <option value="">Todas as escolas</option>
-                  {escolas.map((escola) => (
-                    <option key={escola.id} value={escola.nomeEscola}>{escola.nomeEscola}</option>
-                  ))}
-                </select>
-                <button type="button" onClick={pesquisar} className="rounded-3xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
-                  Buscar
-                </button>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button type="button" onClick={listarBusca} className="rounded-3xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-                  Listar todos
-                </button>
-                <button type="button" onClick={limparBusca} className="rounded-3xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-                  Limpar busca
-                </button>
-                {resultadoBuscaVisivel && (
-                  <div className="ml-auto rounded-3xl bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-700">
-                    {alunosFiltradosOrdenados.length} alunos
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {resultadoBuscaVisivel ? (
-              <div className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-                  <select value={alunoEscolaFiltro} onChange={(e) => setAlunoEscolaFiltro(e.target.value)} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
+              <select value={alunoEscolaFiltro} onChange={(e) => setAlunoEscolaFiltro(e.target.value)} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
                 <option value="">Todas as escolas</option>
                 {escolas.map((escola) => (
                   <option key={escola.id} value={escola.nomeEscola}>{escola.nomeEscola}</option>
                 ))}
-                  </select>
-                  <div className="rounded-3xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700">
-                    {alunosFiltradosOrdenados.length} alunos
-                  </div>
-                </div>
+              </select>
+              <div className="rounded-3xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700">
+                {alunosFiltradosOrdenados.length} alunos
+              </div>
+            </div>
 
-                <div className="overflow-x-auto rounded-3xl border border-slate-200">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-slate-100 text-slate-600">
-                      <tr>
-                        <th className="px-5 py-4 font-medium">Aluno</th>
-                        <th className="px-5 py-4 font-medium">Responsavel</th>
-                        <th className="px-5 py-4 font-medium">Escola</th>
-                        <th className="px-5 py-4 font-medium">Turma</th>
-                        <th className="px-5 py-4 font-medium">Contrato</th>
-                        <th className="px-5 py-4 font-medium">Acoes</th>
+            <div className="overflow-x-auto rounded-3xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-5 py-4 font-medium">Aluno</th>
+                    <th className="px-5 py-4 font-medium">Responsavel</th>
+                    <th className="px-5 py-4 font-medium">Escola</th>
+                    <th className="px-5 py-4 font-medium">Turma</th>
+                    <th className="px-5 py-4 font-medium">Contrato</th>
+                    <th className="px-5 py-4 font-medium">Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alunosFiltradosOrdenados.length > 0 ? (
+                    alunosFiltradosOrdenados.map((aluno) => (
+                      <tr key={aluno.id} className="border-t border-slate-200 hover:bg-slate-50">
+                        <td className="px-5 py-4">{aluno.nome}</td>
+                        <td className="px-5 py-4">{aluno.nomeResponsavel || "-"}</td>
+                        <td className="px-5 py-4">{aluno.escola || "-"}</td>
+                        <td className="px-5 py-4">{aluno.turma || "-"}</td>
+                        <td className="px-5 py-4">{moeda(aluno.valorContrato)}</td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                            <button type="button" onClick={() => abrirAlunoDetalhe(aluno)} className="rounded-3xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">Abrir cadastro</button>
+                            <button type="button" onClick={() => abrirFinanceiroAluno(aluno)} className="rounded-3xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">Financeiro</button>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {alunosFiltradosOrdenados.length > 0 ? (
-                        alunosFiltradosOrdenados.map((aluno) => (
-                          <tr key={aluno.id} className="border-t border-slate-200 hover:bg-slate-50">
-                            <td className="px-5 py-4">{aluno.nome}</td>
-                            <td className="px-5 py-4">{aluno.nomeResponsavel || "-"}</td>
-                            <td className="px-5 py-4">{aluno.escola || "-"}</td>
-                            <td className="px-5 py-4">{aluno.turma || "-"}</td>
-                            <td className="px-5 py-4">{moeda(aluno.valorContrato)}</td>
-                            <td className="px-5 py-4">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                                <button type="button" onClick={() => abrirAlunoDetalhe(aluno)} className="rounded-3xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">Abrir cadastro</button>
-                                <button type="button" onClick={() => abrirFinanceiroAluno(aluno)} className="rounded-3xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">Financeiro</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={6} className="px-5 py-6 text-center text-slate-500">Nenhum aluno encontrado.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-5 py-8 text-center text-slate-500">
-                Use a busca por nome do aluno, responsavel ou escola para carregar a lista.
-              </div>
-            )}
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-6 text-center text-slate-500">Nenhum aluno encontrado.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </section>
@@ -2004,10 +1677,7 @@ export default function Home() {
             <h2 className="text-2xl font-semibold text-slate-950">Escolas cadastradas</h2>
             <p className="mt-2 text-slate-600">Selecione uma escola para abrir todos os dados do cadastro.</p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button type="button" onClick={() => { setView("escola"); listarEscolas(); }} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Cadastrar escola</button>
-            <button type="button" onClick={() => { setView("menu"); setEscolaDetalhe(null); setMostrarAlunosEscola(false); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
-          </div>
+          <button type="button" onClick={() => { setView("menu"); setEscolaDetalhe(null); setMostrarAlunosEscola(false); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
         </div>
 
         {escolaDetalhe ? (
@@ -2182,429 +1852,6 @@ export default function Home() {
     );
   }
 
-  function contaPagamentoAluno() {
-    if (!alunoSelecionado) return null;
-
-    return (
-      <aside className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-700">Conta de pagamento</p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-950">{alunoSelecionado.nome}</h2>
-              <p className="mt-1 text-sm text-slate-600">{alunoSelecionado.nomeResponsavel || "-"} · {alunoSelecionado.escola || "-"}</p>
-            </div>
-            <button type="button" onClick={() => setAlunoSelecionado(null)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Fechar</button>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Valor total do contrato</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorTotalContrato)}</p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Valor para quitar</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorRestanteContrato)}</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <input type="number" step="0.01" placeholder="Valor do pagamento (R$)" value={pagamento.valor} onChange={(e) => setPagamento({ ...pagamento, valor: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="number" min="1" placeholder="N. da parcela" value={numeroParcela} onChange={(e) => setNumeroParcela(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={registrarPagamento} disabled={!infraOnline} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Confirmar pagamento</button>
-            <button type="button" onClick={() => abrirResumoFinanceiro(alunoSelecionado)} className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Gerar resumo financeiro</button>
-            <button type="button" onClick={() => abrirRecibo(ultimoPagamento, alunoSelecionado)} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Gerar recibo</button>
-          </div>
-
-          {pagamentos.length > 0 && (
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <h3 className="text-lg font-semibold text-slate-950">Historico de pagamentos</h3>
-              <div className="mt-4 space-y-3">
-                {pagamentos.map((pag) => (
-                  <div key={pag.id} className="rounded-xl bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm text-slate-500">Parcela {pag.numeroParcela || 0}</p>
-                        <p className="text-lg font-semibold text-slate-950">{moeda(pag.valor)}</p>
-                      </div>
-                      <button type="button" onClick={() => abrirRecibo(pag, pag.aluno || alunoSelecionado)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">Recibo</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-    );
-  }
-
-  function financeiroView() {
-    return (
-      <section className="space-y-6">
-        <div className="grid gap-4 xl:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Em aberto</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Pagos</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Inadimplentes</p>
-            <p className="mt-5 text-3xl font-semibold text-slate-950">{alunos.filter(alunoEstaInadimplente).length}</p>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-            <div className="grid flex-1 gap-3 md:grid-cols-3">
-              <input type="text" placeholder="Nome do aluno" value={financeiroBusca.nome} onChange={(e) => setFinanceiroBusca({ ...financeiroBusca, nome: e.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <input type="text" placeholder="Nome do responsavel" value={financeiroBusca.responsavel} onChange={(e) => setFinanceiroBusca({ ...financeiroBusca, responsavel: e.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <input type="text" placeholder="Escola" value={financeiroBusca.escola} onChange={(e) => setFinanceiroBusca({ ...financeiroBusca, escola: e.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            </div>
-            <button type="button" onClick={buscarAlunoFinanceiro} className="rounded-2xl bg-sky-600 px-6 py-4 text-sm font-semibold text-white transition hover:bg-sky-700">Buscar aluno</button>
-          </div>
-
-          {financeiroBuscaRealizada && (
-            <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-700">
-                  <tr>
-                    <th className="px-5 py-4 font-semibold">Aluno</th>
-                    <th className="px-5 py-4 font-semibold">Responsavel</th>
-                    <th className="px-5 py-4 font-semibold">Escola</th>
-                    <th className="px-5 py-4 font-semibold">Turma</th>
-                    <th className="px-5 py-4 font-semibold">Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {financeiroResultados.length > 0 ? (
-                    financeiroResultados.map((aluno) => (
-                      <tr key={aluno.id} className="border-t border-slate-200 hover:bg-slate-50">
-                        <td className="px-5 py-4 font-semibold text-slate-950">{aluno.nome}</td>
-                        <td className="px-5 py-4">{aluno.nomeResponsavel || "-"}</td>
-                        <td className="px-5 py-4">{aluno.escola || "-"}</td>
-                        <td className="px-5 py-4">{aluno.turma || "-"}</td>
-                        <td className="px-5 py-4">
-                          <button type="button" onClick={() => abrirFinanceiroAluno(aluno)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">Selecionar</button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-6 text-center text-slate-500">Nenhum aluno encontrado.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className={alunoSelecionado || alunoFinanceiro ? "grid gap-4 xl:grid-cols-[1fr_0.9fr]" : "grid gap-4"}>
-          {contaPagamentoAluno()}
-          {painelFinanceiroAluno()}
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-950">Parcelas e contratos</h2>
-          <div className="mt-6 flex flex-wrap gap-3">
-            {["todos", "pendente", "parcial", "inadimplente", "pago"].map((status) => (
-              <button
-                key={status}
-                type="button"
-                onClick={() => setFiltroParcela(status)}
-                className={`rounded-xl border px-5 py-3 text-lg transition ${filtroParcela === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-700">
-                <tr>
-                  <th className="px-5 py-4 font-semibold">Aluno</th>
-                  <th className="px-5 py-4 font-semibold">Escola</th>
-                  <th className="px-5 py-4 font-semibold">Valor contrato</th>
-                  <th className="px-5 py-4 font-semibold">Falta quitar</th>
-                  <th className="px-5 py-4 font-semibold">Prazo final de quitação</th>
-                  <th className="px-5 py-4 font-semibold">Valor da parcela</th>
-                  <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {parcelasFinanceiro.length > 0 ? (
-                  parcelasFinanceiro.map((item) => (
-                    <tr key={item.aluno.id} className="border-t border-slate-200 hover:bg-slate-50">
-                      <td className="px-5 py-5 font-semibold text-slate-950">{item.aluno.nome}</td>
-                      <td className="px-5 py-5">{item.aluno.escola || "-"}</td>
-                      <td className="px-5 py-5">{moeda(item.aluno.valorContrato)}</td>
-                      <td className="px-5 py-5">{moeda(item.aluno.valorRestanteContrato ?? item.aluno.valorContrato)}</td>
-                      <td className="px-5 py-5">{item.prazoFinalQuitacao && item.prazoFinalQuitacao !== "-" ? new Date(`${item.prazoFinalQuitacao}T00:00:00`).toLocaleDateString("pt-BR") : "-"}</td>
-                      <td className="px-5 py-5">{moeda(item.valor)}</td>
-                      <td className="px-5 py-5">
-                        <select value={item.status} onChange={(e) => atualizarStatusParcela(item.aluno.id, e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                          <option value="pendente">pendente</option>
-                          <option value="inadimplente">inadimplente</option>
-                          <option value="pago">pago</option>
-                          <option value="parcial">parcial</option>
-                        </select>
-                      </td>
-                      <td className="px-5 py-5">
-                        <button type="button" onClick={() => abrirFinanceiroAluno(item.aluno)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">Pagamento</button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8} className="px-5 py-8 text-center text-slate-500">Nenhuma parcela encontrada.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-      </section>
-    );
-  }
-
-  function tarefasView() {
-    const departamentos = ["todos", "Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administracao", "concluidas"];
-    const hoje = new Date().toISOString().slice(0, 10);
-    const demandas = demandasInternas.filter((demanda) => {
-      if (departamentoAtivo === "concluidas" && demanda.status !== "concluida") return false;
-      if (departamentoAtivo !== "todos" && departamentoAtivo !== "concluidas" && demanda.departamento !== departamentoAtivo) return false;
-      if (tarefaFiltroResponsavel !== "todos" && demanda.responsavel !== tarefaFiltroResponsavel) return false;
-      if (tarefaFiltroPrioridade !== "todas" && demanda.prioridade !== tarefaFiltroPrioridade) return false;
-      if (tarefaFiltroPrazo === "hoje" && demanda.prazo !== hoje) return false;
-      if (tarefaFiltroPrazo === "atrasadas" && !(demanda.prazo < hoje && demanda.status !== "concluida")) return false;
-      if (tarefaFiltroPrazo === "sem-prazo" && Boolean(demanda.prazo)) return false;
-      if (tarefaBusca.trim()) {
-        const alvo = `${demanda.titulo} ${demanda.aluno || ""} ${demanda.departamento} ${demanda.responsavel}`.toLowerCase();
-        if (!alvo.includes(tarefaBusca.trim().toLowerCase())) return false;
-      }
-      return true;
-    });
-    const demandasHoje = demandas.filter((demanda) => demanda.prazo === hoje && demanda.status !== "concluida");
-    const demandasAtrasadas = demandas.filter((demanda) => demanda.prazo < hoje && demanda.status !== "concluida");
-    const demandasSemResponsavel = demandas.filter((demanda) => !demanda.responsavel?.trim());
-    const demandasConcluidasHoje = demandas.filter((demanda) => demanda.status === "concluida" && demanda.prazo === hoje);
-    const tarefasPorStatus = {
-      aberta: demandas.filter((demanda) => demanda.status === "aberta"),
-      "em andamento": demandas.filter((demanda) => demanda.status === "em andamento"),
-      aguardando: demandas.filter((demanda) => demanda.status === "aguardando"),
-      concluida: demandas.filter((demanda) => demanda.status === "concluida")
-    } as const;
-    const tarefaDetalhe = demandas.find((demanda) => demanda.id === tarefaDetalheId) || null;
-    const prioridadeClasse: Record<string, string> = {
-      media: "bg-sky-100 text-sky-800",
-      alta: "bg-amber-100 text-amber-800",
-      urgente: "bg-rose-100 text-rose-800"
-    };
-
-    return (
-      <section className="grid items-start gap-4 xl:grid-cols-[400px_minmax(0,1fr)]">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-[1.5rem] font-semibold text-slate-950">Criar demanda</h2>
-          <div className="mt-6 space-y-4">
-            <input type="text" placeholder="Descrição da demanda" value={novaDemandaForm.titulo} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={novaDemandaForm.aluno} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="">Aluno vinculado</option>
-              {alunos.map((aluno) => (
-                <option key={aluno.id} value={aluno.nome}>{aluno.nome}</option>
-              ))}
-            </select>
-            <select value={novaDemandaForm.departamento} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, departamento: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="Financeiro">Financeiro</option>
-              <option value="Atendimento">Atendimento</option>
-              <option value="Contratos">Contratos</option>
-              <option value="Eventos">Eventos</option>
-              <option value="Distratos">Distratos</option>
-              <option value="Administracao">Administracao</option>
-            </select>
-            <select value={novaDemandaForm.responsavelId} onChange={(e) => { setNovaDemandaForm({ ...novaDemandaForm, responsavelId: e.target.value }); if (e.target.value) setErroResponsavelDemanda(false); }} className={`w-full rounded-2xl border bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:ring-2 ${erroResponsavelDemanda ? "border-rose-300 focus:border-rose-500 focus:ring-rose-200" : "border-slate-200 focus:border-sky-500 focus:ring-sky-200"}`}>
-              <option value="">Responsável (usuário cadastrado)</option>
-              {usuariosCadastrados.map((usuario) => (
-                <option key={usuario.id} value={usuario.id}>{usuario.nome}</option>
-              ))}
-            </select>
-            {erroResponsavelDemanda && (
-              <p className="text-sm font-medium text-rose-700">Responsável é obrigatório.</p>
-            )}
-            <select value={novaDemandaForm.prioridade} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, prioridade: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="media">media</option>
-              <option value="alta">alta</option>
-              <option value="urgente">urgente</option>
-            </select>
-            <textarea placeholder="Comentário inicial" value={novaDemandaForm.comentario} onChange={(e) => setNovaDemandaForm({ ...novaDemandaForm, comentario: e.target.value })} className="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-base text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <button type="button" onClick={salvarDemanda} disabled={!infraOnline || usuariosCadastrados.length === 0} className="w-full rounded-2xl bg-slate-950 px-5 py-3 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar demanda</button>
-            {usuariosCadastrados.length === 0 && (
-              <p className="text-sm text-amber-700">Cadastre ao menos um usuário para selecionar o responsável da tarefa.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-[1.5rem] font-semibold text-slate-950">Fila por departamento</h2>
-            <div className="mt-6 flex flex-wrap gap-3">
-              {departamentos.map((departamento) => (
-                <button
-                  key={departamento}
-                  type="button"
-                  onClick={() => setDepartamentoAtivo(departamento)}
-                  className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${departamentoAtivo === departamento ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}
-                >
-                  {departamento === "concluidas" ? "Concluídas" : departamento}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              <input value={tarefaBusca} onChange={(e) => setTarefaBusca(e.target.value)} placeholder="Buscar tarefa" className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <select value={tarefaFiltroResponsavel} onChange={(e) => setTarefaFiltroResponsavel(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-                <option value="todos">Responsável: todos</option>
-                {Array.from(new Set(demandasInternas.map((d) => d.responsavel).filter(Boolean))).map((responsavel) => (
-                  <option key={responsavel} value={responsavel}>{responsavel}</option>
-                ))}
-              </select>
-              <select value={tarefaFiltroPrioridade} onChange={(e) => setTarefaFiltroPrioridade(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-                <option value="todas">Prioridade: todas</option>
-                <option value="media">Média</option>
-                <option value="alta">Alta</option>
-                <option value="urgente">Urgente</option>
-              </select>
-              <select value={tarefaFiltroPrazo} onChange={(e) => setTarefaFiltroPrazo(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-                <option value="todos">Prazo: todos</option>
-                <option value="hoje">Vencendo hoje</option>
-                <option value="atrasadas">Atrasadas</option>
-                <option value="sem-prazo">Sem prazo</option>
-              </select>
-              <button type="button" onClick={() => { setTarefaBusca(""); setTarefaFiltroPrazo("todos"); setTarefaFiltroPrioridade("todas"); setTarefaFiltroResponsavel("todos"); }} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Limpar filtros</button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Hoje</p><p className="mt-2 text-2xl font-semibold">{demandasHoje.length}</p></div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Atrasadas</p><p className="mt-2 text-2xl font-semibold">{demandasAtrasadas.length}</p></div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-slate-600">Concluídas hoje</p><p className="mt-2 text-2xl font-semibold">{demandasConcluidasHoje.length}</p></div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                { key: "aberta", title: "Abertas", data: tarefasPorStatus.aberta },
-                { key: "em andamento", title: "Em andamento", data: tarefasPorStatus["em andamento"] },
-                { key: "aguardando", title: "Aguardando", data: tarefasPorStatus.aguardando },
-                { key: "concluida", title: "Concluídas", data: tarefasPorStatus.concluida }
-              ].map((coluna) => (
-                <div key={coluna.key} className="self-start rounded-2xl border border-slate-200 bg-white p-3">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-700">{coluna.title}</h3>
-                    <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{coluna.data.length}</span>
-                  </div>
-                  <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
-                    {coluna.data.map((demanda) => (
-                      <button key={demanda.id} type="button" onClick={() => setTarefaDetalheId(demanda.id)} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-left hover:border-sky-200 hover:bg-white">
-                        <p className="text-sm font-semibold text-slate-950">{demanda.titulo}</p>
-                        <p className="mt-1 text-xs text-slate-600">{demanda.aluno || "Aluno"} · {demanda.departamento}</p>
-                        <div className="mt-2 flex items-center justify-between">
-                          <span className={`rounded-md px-2 py-1 text-xs font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
-                          <span className="text-xs text-slate-500">{demanda.prazo || "Sem prazo"}</span>
-                        </div>
-                        <p className="mt-2 text-[11px] text-slate-500">
-                          Criação: {demanda.criadoEm ? new Date(demanda.criadoEm).toLocaleDateString("pt-BR") : "-"}
-                        </p>
-                      </button>
-                    ))}
-                    {coluna.data.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 p-3 text-xs text-slate-500">Sem tarefas</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-slate-700">Detalhes da tarefa</h3>
-              {!tarefaDetalhe ? (
-                <p className="mt-3 text-sm text-slate-500">Clique em uma tarefa do quadro para abrir detalhes.</p>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  <p className="text-base font-semibold text-slate-950">{tarefaDetalhe.titulo}</p>
-                  <p className="text-sm text-slate-600">{tarefaDetalhe.aluno || "Aluno"} · {tarefaDetalhe.departamento}</p>
-                  <p className="text-sm text-slate-700">Responsável: {tarefaDetalhe.responsavel || "-"}</p>
-                  <p className="text-sm text-slate-700">Prazo: {tarefaDetalhe.prazo || "Sem prazo"}</p>
-                  <p className="text-sm text-slate-700">Criação: {tarefaDetalhe.criadoEm ? new Date(tarefaDetalhe.criadoEm).toLocaleString("pt-BR") : "-"}</p>
-                  <p className="text-sm text-slate-700">Conclusão: {tarefaDetalhe.concluidoEm ? new Date(tarefaDetalhe.concluidoEm).toLocaleString("pt-BR") : "-"}</p>
-                  <select value={tarefaDetalhe.status} onChange={(e) => atualizarStatusDemanda(tarefaDetalhe.id, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-                    <option value="aberta">aberta</option>
-                    <option value="em andamento">em andamento</option>
-                    <option value="aguardando">aguardando</option>
-                    <option value="concluida">concluida</option>
-                  </select>
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Comentários</p>
-                    {tarefaDetalhe.comentarios.length > 0 ? tarefaDetalhe.comentarios.map((comentario, index) => (
-                      <p key={`${tarefaDetalhe.id}-${index}`} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">{comentario}</p>
-                    )) : <p className="text-sm text-slate-500">Sem comentários</p>}
-                  </div>
-                  <textarea value={comentarioDemanda} onChange={(e) => { setDemandaSelecionadaId(tarefaDetalhe.id); setComentarioDemanda(e.target.value); }} placeholder="Adicionar comentário" className="min-h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-                  <button type="button" onClick={adicionarComentarioDemanda} className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Salvar comentário</button>
-                  <button type="button" onClick={() => removerDemanda(tarefaDetalhe.id)} className="w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">Apagar tarefa</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-    );
-  }
-  function usuariosView() {
-    return (
-      <section className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-950">Novo usuário</h2>
-          <div className="mt-4 space-y-3">
-            <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="email" placeholder="E-mail" value={novoUsuarioForm.email} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, email: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={novoUsuarioForm.perfil} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, perfil: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="Administrador">Administrador</option>
-              <option value="Financeiro">Financeiro</option>
-              <option value="Atendimento">Atendimento</option>
-              <option value="Consulta">Consulta</option>
-            </select>
-            <button type="button" onClick={salvarUsuarioSistema} disabled={!infraOnline} className="w-full rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar usuário</button>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-950">Usuários e permissões</h2>
-          <p className="mt-2 text-sm text-slate-600">Area visual restaurada para manter o menu completo. Ainda sem persistência conectada na API antiga.</p>
-          <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-            {usuariosCadastrados.length === 0 ? (
-              "Nenhum usuário configurado neste módulo."
-            ) : (
-              <ul className="space-y-2">
-                {usuariosCadastrados.map((usuario) => (
-                  <li key={usuario.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700">
-                    <strong>{usuario.nome}</strong> - {usuario.email} - {usuario.perfil}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </section>
-    );
-  }
-
   function cadastroEscola() {
     return (
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
@@ -2648,7 +1895,7 @@ export default function Home() {
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <button type="button" onClick={salvarEscola} disabled={!infraOnline} className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">{escolaEditando ? "Atualizar escola" : "Salvar escola"}</button>
+          <button type="button" onClick={salvarEscola} className="rounded-3xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">{escolaEditando ? "Atualizar escola" : "Salvar escola"}</button>
           {escolaEditando && (
             <button type="button" onClick={resetEscolaForm} className="rounded-3xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
           )}
@@ -2680,7 +1927,7 @@ export default function Home() {
                 ))}
               </select>
               <input type="number" step="0.01" placeholder="Desconto em R$" value={comissaoForm.desconto} onChange={(e) => setComissaoForm({ ...comissaoForm, desconto: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <button type="button" onClick={salvarComissao} disabled={!comissaoForm.escolaId || !comissaoForm.alunoId || !infraOnline} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Adicionar aluno</button>
+              <button type="button" onClick={salvarComissao} disabled={!comissaoForm.escolaId || !comissaoForm.alunoId} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Adicionar aluno</button>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-3">
@@ -2799,370 +2046,199 @@ export default function Home() {
 
   function cadastroAluno() {
     return (
-      <section className="w-full">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-950">{alunoEditando ? "Editar aluno" : "Cadastrar aluno"}</h2>
-              <p className="mt-1 text-xs text-slate-500">Dados completos do contrato.</p>
-            </div>
-            <button type="button" onClick={() => { resetAlunoForm(); setView("menu"); }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <input type="text" placeholder="Nome" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="tel" placeholder="Telefone" value={alunoForm.telefone} onChange={(e) => setAlunoForm({ ...alunoForm, telefone: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="text" placeholder="Responsável" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <input type="tel" placeholder="Telefone do responsável" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={alunoForm.escolaId} onChange={(e) => setAlunoForm({ ...alunoForm, escolaId: e.target.value, escola: escolas.find((escola) => escola.id.toString() === e.target.value)?.nomeEscola || "" })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="">Selecione a escola</option>
-              {escolas.map((escola) => (
-                <option key={escola.id} value={escola.id}>{escola.nomeEscola}</option>
-              ))}
-            </select>
-            <input type="text" placeholder="Turma" value={alunoForm.turma} onChange={(e) => setAlunoForm({ ...alunoForm, turma: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={alunoForm.formaPagamento} onChange={(e) => setAlunoForm({ ...alunoForm, formaPagamento: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="">Forma de pagamento</option>
-              <option value="Pix">Pix</option>
-              <option value="Dinheiro">Dinheiro</option>
-              <option value="Cartao de credito">Cartao de credito</option>
-              <option value="Cartao de debito">Cartao de debito</option>
-            </select>
-            <input type="number" placeholder="Parcelas" value={alunoForm.parcelas} onChange={(e) => setAlunoForm({ ...alunoForm, parcelas: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-xl bg-slate-100 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Valor do contrato</p>
-                <p className="mt-2 text-xl font-semibold text-slate-950">{moeda(valorContratoAluno)}</p>
+      <section className="grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
+        <div className="space-y-6">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-semibold text-slate-950">{alunoEditando ? "Editar aluno" : "Cadastro de aluno"}</h2>
+                <p className="mt-2 text-slate-600">{alunoEditando ? "Atualize os dados, escola, turma, servicos e parcelas." : "Crie novos alunos e defina o valor mensal automaticamente."}</p>
               </div>
-              <div className="rounded-xl bg-slate-100 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Valor mensal</p>
-                <p className="mt-2 text-xl font-semibold text-slate-950">{moeda(valorMensalPreview)}</p>
+              <button type="button" onClick={() => { resetAlunoForm(); setView("menu"); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
+            </div>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <input type="text" placeholder="Nome" value={alunoForm.nome} onChange={(e) => setAlunoForm({ ...alunoForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="text" placeholder="Nome do responsavel" value={alunoForm.nomeResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, nomeResponsavel: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="tel" placeholder="Telefone do responsavel" value={alunoForm.telefoneResponsavel} onChange={(e) => setAlunoForm({ ...alunoForm, telefoneResponsavel: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="tel" placeholder="Telefone do aluno" value={alunoForm.telefone} onChange={(e) => setAlunoForm({ ...alunoForm, telefone: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <select value={alunoForm.escolaId} onChange={(e) => setAlunoForm({ ...alunoForm, escolaId: e.target.value, escola: escolas.find((escola) => escola.id.toString() === e.target.value)?.nomeEscola || "" })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="">Selecione a escola</option>
+                {escolas.map((escola) => (
+                  <option key={escola.id} value={escola.id}>{escola.nomeEscola}</option>
+                ))}
+              </select>
+              <input type="text" placeholder="Turma" value={alunoForm.turma} onChange={(e) => setAlunoForm({ ...alunoForm, turma: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="number" placeholder="Parcelas" value={alunoForm.parcelas} onChange={(e) => setAlunoForm({ ...alunoForm, parcelas: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <div className="rounded-3xl bg-slate-100 p-4"><span className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor do contrato</span><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorContratoAluno)}</p></div>
+              <div className="rounded-3xl bg-slate-100 p-4"><span className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor mensal</span><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorMensalPreview)}</p></div>
+            </div>
+            {escolas.length === 0 && (
+              <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">
+                Cadastre uma escola primeiro para puxar os valores dos servicos.
+              </div>
+            )}
+            <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <h3 className="text-lg font-semibold text-slate-950">Servicos do aluno</h3>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <label className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={alunoForm.baile} onChange={(e) => setAlunoForm({ ...alunoForm, baile: e.target.checked })} className="h-5 w-5 rounded border-slate-300 accent-sky-600" />
+                  Baile {escolaSelecionada ? `(${moeda(escolaSelecionada.valorBaile)})` : ""}
+                </label>
+                <label className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={alunoForm.kitFormatura} onChange={(e) => setAlunoForm({ ...alunoForm, kitFormatura: e.target.checked })} className="h-5 w-5 rounded border-slate-300 accent-sky-600" />
+                  Kit Formatura {escolaSelecionada ? `(${moeda(escolaSelecionada.valorKitFormatura)})` : ""}
+                </label>
+                <label className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={alunoForm.placaHomenagem} onChange={(e) => setAlunoForm({ ...alunoForm, placaHomenagem: e.target.checked, quantidadePlacaHomenagem: e.target.checked ? alunoForm.quantidadePlacaHomenagem : "1" })} className="h-5 w-5 rounded border-slate-300 accent-sky-600" />
+                  Placa de homenagem {escolaSelecionada ? `(${moeda(escolaSelecionada.valorPlacaHomenagem)} cada)` : ""}
+                </label>
+                <label className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={alunoForm.placaReplica} onChange={(e) => setAlunoForm({ ...alunoForm, placaReplica: e.target.checked, quantidadePlacaReplica: e.target.checked ? alunoForm.quantidadePlacaReplica : "1" })} className="h-5 w-5 rounded border-slate-300 accent-sky-600" />
+                  Placa replica {escolaSelecionada ? `(${moeda(escolaSelecionada.valorPlacaReplica)} cada)` : ""}
+                </label>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                {alunoForm.placaHomenagem && (
+                  <input type="number" min="1" placeholder="Quantidade de placas" value={alunoForm.quantidadePlacaHomenagem} onChange={(e) => setAlunoForm({ ...alunoForm, quantidadePlacaHomenagem: e.target.value })} className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                )}
+                {alunoForm.placaReplica && (
+                  <input type="number" min="1" placeholder="Quantidade de placas replica" value={alunoForm.quantidadePlacaReplica} onChange={(e) => setAlunoForm({ ...alunoForm, quantidadePlacaReplica: e.target.value })} className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                )}
               </div>
             </div>
-          </div>
-
-          {escolas.length === 0 && (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-900">
-              Cadastre uma escola primeiro para puxar os valores dos servicos.
-            </div>
-          )}
-
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 className="text-sm font-semibold text-slate-950">Servicos do aluno</h3>
-            <div className="mt-3 space-y-3">
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700">
-                <input type="checkbox" checked={alunoForm.baile} onChange={(e) => setAlunoForm({ ...alunoForm, baile: e.target.checked })} className="h-4 w-4 rounded border-slate-300 accent-sky-600" />
-                Baile {escolaSelecionada ? `(${moeda(escolaSelecionada.valorBaile)})` : ""}
-              </label>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700">
-                <input type="checkbox" checked={alunoForm.kitFormatura} onChange={(e) => setAlunoForm({ ...alunoForm, kitFormatura: e.target.checked })} className="h-4 w-4 rounded border-slate-300 accent-sky-600" />
-                Kit Formatura {escolaSelecionada ? `(${moeda(escolaSelecionada.valorKitFormatura)})` : ""}
-              </label>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700">
-                <input type="checkbox" checked={alunoForm.placaHomenagem} onChange={(e) => setAlunoForm({ ...alunoForm, placaHomenagem: e.target.checked, quantidadePlacaHomenagem: e.target.checked ? alunoForm.quantidadePlacaHomenagem : "1" })} className="h-4 w-4 rounded border-slate-300 accent-sky-600" />
-                Placa de homenagem {escolaSelecionada ? `(${moeda(escolaSelecionada.valorPlacaHomenagem)} cada)` : ""}
-              </label>
-              {alunoForm.placaHomenagem && (
-                <input type="number" min="1" placeholder="Quantidade de placas homenagem" value={alunoForm.quantidadePlacaHomenagem} onChange={(e) => setAlunoForm({ ...alunoForm, quantidadePlacaHomenagem: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              )}
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700">
-                <input type="checkbox" checked={alunoForm.placaReplica} onChange={(e) => setAlunoForm({ ...alunoForm, placaReplica: e.target.checked, quantidadePlacaReplica: e.target.checked ? alunoForm.quantidadePlacaReplica : "1" })} className="h-4 w-4 rounded border-slate-300 accent-sky-600" />
-                Placa replica {escolaSelecionada ? `(${moeda(escolaSelecionada.valorPlacaReplica)} cada)` : ""}
-              </label>
-              {alunoForm.placaReplica && (
-                <input type="number" min="1" placeholder="Quantidade de placas replica" value={alunoForm.quantidadePlacaReplica} onChange={(e) => setAlunoForm({ ...alunoForm, quantidadePlacaReplica: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button type="button" onClick={salvarAluno} disabled={!escolaSelecionada} className="rounded-3xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{alunoEditando ? "Atualizar aluno" : "Salvar aluno"}</button>
+              {alunoEditando && (
+                <button type="button" onClick={resetAlunoForm} className="rounded-3xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
               )}
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col gap-3">
-            <button type="button" onClick={salvarAluno} disabled={!escolaSelecionada || !infraOnline} className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{alunoEditando ? "Atualizar aluno" : "Salvar aluno"}</button>
-            {alunoEditando && (
-              <button type="button" onClick={resetAlunoForm} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
+        </div>
+
+        <aside className="space-y-6">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-2xl font-semibold text-slate-950">Conta de pagamento</h2>
+            {alunoSelecionado ? (
+              <div className="mt-6 space-y-4">
+                <div className="rounded-3xl bg-slate-50 p-5"><p className="text-sm uppercase tracking-[0.24em] text-slate-500">Aluno</p><p className="mt-2 text-xl font-semibold text-slate-950">{alunoSelecionado.nome}</p><p className="mt-1 text-sm text-slate-500">{alunoSelecionado.telefone}</p></div>
+                <div className="rounded-3xl bg-slate-50 p-5"><p className="text-sm uppercase tracking-[0.24em] text-slate-500">Responsavel</p><p className="mt-2 text-xl font-semibold text-slate-950">{alunoSelecionado.nomeResponsavel || "-"}</p><p className="mt-1 text-sm text-slate-500">{alunoSelecionado.telefoneResponsavel || "-"}</p></div>
+                <div className="grid gap-4">
+                  <div className="rounded-3xl bg-slate-50 p-5"><p className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor total do contrato</p><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorTotalContrato)}</p></div>
+                  <div className="rounded-3xl bg-slate-50 p-5"><p className="text-sm uppercase tracking-[0.24em] text-slate-500">Valor para quitar contrato</p><p className="mt-3 text-2xl font-semibold text-slate-950">{moeda(valorRestanteContrato)}</p></div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <input type="number" step="0.01" placeholder="Valor do pagamento (R$)" value={pagamento.valor} onChange={(e) => setPagamento({ ...pagamento, valor: e.target.value })} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                  <input type="number" min="1" placeholder="N. da parcela" value={numeroParcela} onChange={(e) => setNumeroParcela(e.target.value)} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button type="button" onClick={registrarPagamento} className="flex-1 rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Confirmar pagamento</button>
+                  <button type="button" onClick={() => abrirRecibo(ultimoPagamento, alunoSelecionado)} className="flex-1 rounded-3xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Gerar recibo</button>
+                  <button type="button" onClick={() => setAlunoSelecionado(null)} className="flex-1 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Fechar</button>
+                </div>
+                {pagamentos.length > 0 && (
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <h3 className="text-lg font-semibold text-slate-950">Historico de pagamentos</h3>
+                    <div className="mt-4 space-y-3">
+                      {pagamentos.map((pag) => (
+                        <div key={pag.id} className="rounded-3xl bg-white p-4 shadow-sm">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm text-slate-500">Parcela {pag.numeroParcela || 0}</p>
+                              <p className="text-lg font-semibold text-slate-950">{moeda(pag.valor)}</p>
+                            </div>
+                            <button type="button" onClick={() => abrirRecibo(pag, pag.aluno || alunoSelecionado)} className="rounded-3xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">Recibo</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-6 rounded-3xl bg-slate-50 p-6 text-slate-600">Selecione um aluno na tabela para visualizar pagamentos.</div>
             )}
           </div>
-        </div>
-
-        <div className="hidden">
-          <h2 className="text-2xl font-semibold text-slate-950">Base de alunos</h2>
-
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <input type="text" placeholder="Buscar por nome, CPF, e-mail ou responsável" value={search.nome} onChange={(e) => setSearch({ ...search, nome: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-            <select value={alunoEscolaFiltro} onChange={(e) => setAlunoEscolaFiltro(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option value="">Todas as turmas</option>
-              {escolas.map((escola) => (
-                <option key={escola.id} value={escola.nomeEscola}>{escola.nomeEscola}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full text-left text-lg">
-              <thead className="bg-slate-50 text-[#08265f]">
-                <tr>
-                  <th className="px-5 py-4 font-semibold">Aluno</th>
-                  <th className="px-5 py-4 font-semibold">Turma</th>
-                  <th className="px-5 py-4 font-semibold">Responsável</th>
-                  <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">Histórico</th>
-                </tr>
-              </thead>
-              <tbody>
-                {alunosFiltradosOrdenados
-                  .filter((aluno) => {
-                    const termo = search.nome.trim().toLowerCase();
-                    if (!termo) return true;
-                    return [aluno.nome, aluno.nomeResponsavel, aluno.escola, aluno.turma, aluno.telefone].some((valor) => (valor || "").toLowerCase().includes(termo));
-                  })
-                  .map((aluno) => (
-                    <tr key={aluno.id} onDoubleClick={() => editarAluno(aluno)} className="border-t border-slate-200 hover:bg-slate-50">
-                      <td className="px-5 py-5 align-top">
-                        <p className="font-semibold text-slate-950">{aluno.nome}</p>
-                        <p className="text-sm text-[#37537a]">{aluno.telefone || "-"}</p>
-                      </td>
-                      <td className="px-5 py-5 align-top">{aluno.turma || "-"}</td>
-                      <td className="px-5 py-5 align-top">{aluno.nomeResponsavel || "-"}</td>
-                      <td className="px-5 py-5 align-top">
-                        <select value={(aluno.status || (Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) <= 0 ? "ativo" : "inadimplente")).toLowerCase()} onChange={(e) => atualizarStatusAlunoLocal(aluno.id, e.target.value)} className="w-40 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-950 outline-none">
-                          <option value="ativo">ativo</option>
-                          <option value="pendente">pendente</option>
-                          <option value="inadimplente">inadimplente</option>
-                          <option value="cancelado">cancelado</option>
-                          <option value="concluido">concluido</option>
-                        </select>
-                      </td>
-                      <td className="px-5 py-5 align-top text-[#08265f]">
-                        {[aluno.escola ? `Escola ${aluno.escola}` : "", aluno.formaPagamento ? `Pagamento ${aluno.formaPagamento}` : "", aluno.parcelas ? `${aluno.parcelas} parcelas` : ""].filter(Boolean).join(" | ") || "Cadastro importado da API antiga"}
-                      </td>
-                    </tr>
-                  ))}
-                {alunosFiltradosOrdenados.filter((aluno) => {
-                  const termo = search.nome.trim().toLowerCase();
-                  if (!termo) return true;
-                  return [aluno.nome, aluno.nomeResponsavel, aluno.escola, aluno.turma, aluno.telefone].some((valor) => (valor || "").toLowerCase().includes(termo));
-                }).length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-5 py-8 text-center text-slate-500">Nenhum aluno encontrado.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </aside>
       </section>
     );
   }
 
-  if (!authChecked) {
+  if (!usuarioLogado) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 text-slate-950">
-        <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-black">Carregando sistema</h1>
-        </div>
-      </div>
-    );
-  }
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 text-slate-950">
+        <div className="w-full max-w-xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60 sm:p-8">
+          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">Painel TR</p>
+          <h1 className="mt-3 text-3xl font-semibold text-slate-950">Entrar no sistema</h1>
+          <p className="mt-2 text-slate-600">Use o login e senha cadastrados para acessar o CRM.</p>
 
-  if (!authHeader) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-8 text-slate-950">
-        <form onSubmit={entrar} className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-black">Sistema interno</h1>
-
-          <div className="mt-8 space-y-4">
-            <input
-              value={loginForm.email}
-              onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
-              className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50 px-5 text-base text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              placeholder="E-mail"
-              type="email"
-              autoComplete="username"
-            />
-            <input
-              value={loginForm.senha}
-              onChange={(e) => setLoginForm((prev) => ({ ...prev, senha: e.target.value }))}
-              className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50 px-5 text-base text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-              placeholder="Senha"
-              type="password"
-              autoComplete="current-password"
-            />
+          <div className="mt-6 grid gap-4">
+            <input type="text" placeholder="Login" value={loginForm.login} onChange={(e) => setLoginForm({ ...loginForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="password" placeholder="Senha" value={loginForm.senha} onChange={(e) => setLoginForm({ ...loginForm, senha: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") entrar(); }} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <button type="button" onClick={entrar} className="rounded-3xl bg-slate-950 px-6 py-4 text-sm font-semibold text-white transition hover:bg-slate-800">Entrar</button>
           </div>
 
-          {loginErro && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{loginErro}</p>}
+          <div className="mt-6 border-t border-slate-200 pt-6">
+            <button type="button" onClick={() => setMostrarCadastroUsuario(!mostrarCadastroUsuario)} className="text-sm font-semibold text-sky-700">
+              {mostrarCadastroUsuario ? "Ocultar cadastro de usuario" : "Criar usuario"}
+            </button>
 
-          <button type="submit" disabled={loginCarregando} className="mt-6 h-14 w-full rounded-xl bg-[#02071a] px-5 text-base font-semibold text-white transition hover:bg-[#08265f] disabled:cursor-not-allowed disabled:opacity-70">
-            {loginCarregando ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
+            {mostrarCadastroUsuario && (
+              <div className="mt-4 grid gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                <input type="text" placeholder="Login" value={novoUsuarioForm.login} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                <input type="password" placeholder="Senha" value={novoUsuarioForm.senha} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, senha: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                <button type="button" onClick={criarUsuario} className="rounded-3xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Salvar usuario</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f7f9] text-slate-900">
-      <main className="grid min-h-screen lg:grid-cols-[290px_minmax(0,1fr)]">
-        <aside className="border-r border-slate-200 bg-white px-5 py-5 text-slate-700 lg:min-h-screen">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Sistema interno</h1>
-          </div>
-
-          <div className="mt-8 space-y-2">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={item.action}
-                className={`w-full rounded-lg px-4 py-2.5 text-left text-sm font-medium leading-none transition ${view === item.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Departamento ativo</p>
-            <select value={departamentoAtivo} onChange={(e) => setDepartamentoAtivo(e.target.value)} className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
-              <option>Administracao</option>
-              <option>Financeiro</option>
-              <option>Atendimento</option>
-              <option>Contratos</option>
-              <option>Eventos</option>
-            </select>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
-              <span className="rounded-md bg-white px-2.5 py-1.5">Usuários</span>
-              <span className="rounded-md bg-white px-2.5 py-1.5">Permissões</span>
-              <span className="rounded-md bg-white px-2.5 py-1.5">Departamentos</span>
-              <span className="rounded-md bg-white px-2.5 py-1.5">Configurações</span>
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-w-0 bg-[#f6f7f9] p-4 sm:p-5">
-          <header className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${healthStatus.checked ? (healthStatus.serverOnline ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700") : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-                  <span className={`h-2.5 w-2.5 rounded-full ${healthStatus.checked ? (healthStatus.serverOnline ? "bg-emerald-600" : "bg-rose-600") : "bg-slate-400"}`} />
-                  {healthStatus.checked ? (healthStatus.serverOnline ? "Servidor online" : "Servidor offline") : "Servidor verificando"}
-                </div>
-                <div className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${healthStatus.checked ? (healthStatus.databaseOnline ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700") : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-                  <span className={`h-2.5 w-2.5 rounded-full ${healthStatus.checked ? (healthStatus.databaseOnline ? "bg-emerald-600" : "bg-rose-600") : "bg-slate-400"}`} />
-                  {healthStatus.checked ? (healthStatus.databaseOnline ? "Banco online" : "Banco offline") : "Banco verificando"}
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-900">
-                  {dataPainel}
-                </div>
-                <button type="button" onClick={executarBackup} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-                  Backup local
-                </button>
-                <button type="button" onClick={restaurarBackup} disabled={!infraOnline} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-                  Restore
-                </button>
-                <button type="button" onClick={sair} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
-                  Sair
-                </button>
-              </div>
-              {!infraOnline && healthStatus.checked && (
-                <p className="text-sm font-semibold text-rose-700">Salvamento bloqueado ate servidor e banco ficarem online.</p>
-              )}
-              <div>
-                <p className="text-xs font-semibold text-slate-500">Administracao</p>
-                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
-              </div>
-              <div className={`grid gap-3 ${view === "financeiro" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
-                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-600">Alunos</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">{indicadores.totalAlunos}</p>
-                </div>
-                {view === "financeiro" && (
-                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-                    <p className="text-xs font-semibold text-slate-600">Em aberto</p>
-                    <p className="mt-2 text-xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
-                  </div>
-                )}
-                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-600">Tarefas</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">{totalTarefasAbertas}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-600">Usuarios</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-950">{totalUsuarios}</p>
-                </div>
+    <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 sm:px-6 lg:px-10">
+      <main className="mx-auto max-w-7xl space-y-4">
+        <header className="rounded-[2rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-slate-200/50 sm:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-3">
+              <p className="text-sm uppercase tracking-[0.3em] text-sky-600">Painel TR</p>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">CRM de Alunos</h1>
+              <p className="max-w-2xl text-slate-600">Cadastro de alunos, escolas e controle de pagamentos.</p>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <span>Usuario: <strong className="text-slate-950">{usuarioLogado.nome}</strong></span>
+                <button type="button" onClick={sair} className="font-semibold text-rose-700">Sair</button>
               </div>
             </div>
-          </header>
-
-          <div className="mt-4 space-y-4">
-            <div className="sticky top-3 z-20 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-              <div className="flex flex-wrap items-center gap-2">
-                {view === "menu" && (
-                  <>
-                    <button type="button" onClick={() => setView("alunos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Alunos</button>
-                    <button type="button" onClick={() => setView("financeiro")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Financeiro</button>
-                    <button type="button" onClick={() => setView("tarefas")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Tarefas</button>
-                  </>
-                )}
-                {view === "alunos" && (
-                  <>
-                    <button type="button" onClick={() => { setView("aluno"); listarEscolas(); }} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Novo aluno</button>
-                    <button type="button" onClick={listarTodos} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atualizar lista</button>
-                  </>
-                )}
-                {view === "escolas" && (
-                  <>
-                    <button type="button" onClick={() => setView("escola")} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Nova escola</button>
-                    <button type="button" onClick={listarEscolas} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atualizar lista</button>
-                  </>
-                )}
-                {view === "financeiro" && (
-                  <>
-                    <button type="button" onClick={buscarAlunoFinanceiro} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Buscar</button>
-                    <button type="button" onClick={() => setFiltroParcela("todos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Parcelas: todos</button>
-                  </>
-                )}
-                {view === "tarefas" && (
-                  <>
-                    <button type="button" onClick={() => setDepartamentoAtivo("todos")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Fila completa</button>
-                    <button type="button" onClick={() => setTarefaFiltroPrazo("atrasadas")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Atrasadas</button>
-                  </>
-                )}
-                {view === "usuarios" && (
-                  <button type="button" onClick={salvarUsuarioSistema} disabled={!infraOnline} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Salvar usuário</button>
-                )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Alunos</p>
+                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.totalAlunos}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Escolas</p>
+                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Cobrancas</p>
+                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.cobrancasPendentes}</p>
               </div>
             </div>
-            {view === "menu" && menuInicialInterativo()}
-            {view === "aluno" && cadastroAluno()}
-            {view === "alunos" && consultaAlunos()}
-            {view === "escola" && cadastroEscola()}
-            {view === "escolas" && consultaEscolas()}
-            {view === "financeiro" && financeiroView()}
-            {view === "tarefas" && tarefasView()}
-            {view === "usuarios" && usuariosView()}
           </div>
-        </section>
+        </header>
+
+        {buscaAlunosInicio()}
+        {painelFinanceiroAluno()}
+
+        {view === "menu" && menuInicial()}
+        {view === "aluno" && cadastroAluno()}
+        {view === "alunos" && consultaAlunos()}
+        {view === "escola" && cadastroEscola()}
+        {view === "escolas" && consultaEscolas()}
+        {view === "cobrancas" && controleCobrancas()}
+        {view === "manutencao" && manutencaoSistema()}
       </main>
-      {demandaRemovida && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-          <p className="text-sm font-semibold text-slate-900">Tarefa apagada.</p>
-          <div className="mt-3 flex items-center gap-2">
-            <button type="button" onClick={desfazerRemocaoDemanda} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800">
-              Desfazer
-            </button>
-            <button type="button" onClick={() => setDemandaRemovida(null)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
-              Fechar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-
-
-

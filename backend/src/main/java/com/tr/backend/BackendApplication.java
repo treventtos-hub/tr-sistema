@@ -1,7 +1,5 @@
 package com.tr.backend;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.tr.backend.repository.AlunoRepository;
 import com.tr.backend.repository.PagamentoRepository;
 import org.springframework.boot.CommandLineRunner;
@@ -19,11 +17,6 @@ public class BackendApplication {
 	}
 
 	@Bean
-	ObjectMapper objectMapper() {
-		return JsonMapper.builder().findAndAddModules().build();
-	}
-
-	@Bean
 	CommandLineRunner preencherValorRestanteContrato(AlunoRepository alunoRepository, PagamentoRepository pagamentoRepository) {
 		return args -> alunoRepository.findAll().stream()
 				.forEach(aluno -> {
@@ -31,20 +24,18 @@ public class BackendApplication {
 						aluno.setValorRestanteContrato(aluno.getValorContrato());
 					}
 
-					double totalPago = pagamentoRepository.findByAlunoId(aluno.getId()).stream()
-							.mapToDouble(pagamento -> pagamento.getValor() == null ? 0 : pagamento.getValor())
-							.sum();
+					BigDecimal totalPago = pagamentoRepository.findByAlunoId(aluno.getId()).stream()
+							.map(pagamento -> pagamento.getValor() == null ? BigDecimal.ZERO : pagamento.getValor())
+							.reduce(BigDecimal.ZERO, BigDecimal::add);
 
-					boolean contratoFoiUsadoComoSaldo = totalPago > 0
+					boolean contratoFoiUsadoComoSaldo = totalPago.signum() > 0
 							&& aluno.getValorContrato() != null
 							&& aluno.getValorRestanteContrato() != null
-							&& BigDecimal.valueOf(aluno.getValorContrato())
-									.compareTo(BigDecimal.valueOf(aluno.getValorRestanteContrato())) == 0;
+							&& aluno.getValorContrato().compareTo(aluno.getValorRestanteContrato()) == 0;
 
 					if (contratoFoiUsadoComoSaldo) {
-						BigDecimal valorOriginal = BigDecimal.valueOf(aluno.getValorRestanteContrato())
-								.add(BigDecimal.valueOf(totalPago));
-						aluno.setValorContrato(valorOriginal.doubleValue());
+						BigDecimal valorOriginal = aluno.getValorRestanteContrato().add(totalPago);
+						aluno.setValorContrato(valorOriginal);
 					}
 
 					if (aluno.getValorRestanteContrato() != null || contratoFoiUsadoComoSaldo) {

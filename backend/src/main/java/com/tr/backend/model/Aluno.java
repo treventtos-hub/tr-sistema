@@ -2,6 +2,7 @@ package com.tr.backend.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -25,8 +26,6 @@ public class Aluno {
 
     private String categoria;
 
-    private String formaPagamento;
-
     private Boolean baile;
 
     private Boolean kitFormatura;
@@ -39,11 +38,11 @@ public class Aluno {
 
     private Integer quantidadePlacaReplica;
 
-    private Double valorContrato;
+    private BigDecimal valorContrato;
 
-    private Double valorRestanteContrato;
+    private BigDecimal valorRestanteContrato;
 
-    private Double valorMensal;
+    private BigDecimal valorMensal;
 
     private Integer parcelas;
 }

@@ -1,6 +1,5 @@
 package com.tr.backend.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tr.backend.model.Aluno;
 import com.tr.backend.model.ComissaoFormatura;
 import com.tr.backend.model.Demanda;
@@ -25,8 +24,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -220,7 +221,7 @@ public class BackupController {
         public Long id;
         public Long alunoId;
         public String nomeAluno;
-        public Double valor;
+        public BigDecimal valor;
         public Integer numeroParcela;
         public LocalDateTime dataPagamento;
         public String descricao;

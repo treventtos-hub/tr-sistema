@@ -10,11 +10,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
 @RequestMapping("/comissao-formatura")
-@CrossOrigin("*")
+@CrossOrigin(origins = "${app.cors.allowed-origins:http://localhost:3000}")
 public class ComissaoFormaturaController {
 
     private final ComissaoFormaturaRepository repository;
@@ -47,15 +48,16 @@ public class ComissaoFormaturaController {
         Aluno aluno = alunoRepository.findById(comissao.getAlunoId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aluno nao encontrado."));
 
-        double valorOriginal = aluno.getValorContrato() != null ? aluno.getValorContrato() : 0;
-        double desconto = comissao.getDesconto() != null ? comissao.getDesconto() : 0;
+        BigDecimal valorOriginal = aluno.getValorContrato() != null ? aluno.getValorContrato() : BigDecimal.ZERO;
+        BigDecimal desconto = comissao.getDesconto() != null ? comissao.getDesconto() : BigDecimal.ZERO;
+        BigDecimal valorComDesconto = valorOriginal.subtract(desconto);
 
         comissao.setNomeEscola(escola.getNomeEscola());
         comissao.setNomeAluno(aluno.getNome());
         comissao.setNomeResponsavel(aluno.getNomeResponsavel());
         comissao.setTurma(aluno.getTurma());
         comissao.setValorContratoOriginal(valorOriginal);
-        comissao.setValorContratoComDesconto(Math.max(valorOriginal - desconto, 0));
+        comissao.setValorContratoComDesconto(valorComDesconto.signum() > 0 ? valorComDesconto : BigDecimal.ZERO);
 
         return repository.save(comissao);
     }

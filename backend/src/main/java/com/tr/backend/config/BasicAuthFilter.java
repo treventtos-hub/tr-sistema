@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 @Component
+@ConditionalOnProperty(name = "app.basic-auth.enabled", havingValue = "true")
 public class BasicAuthFilter extends OncePerRequestFilter {
 
     private final String username;

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
-type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "cobrancas" | "manutencao";
+type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "cobrancas" | "usuarios" | "manutencao";
 
 type Aluno = {
   id: number;
@@ -89,6 +89,9 @@ type Usuario = {
   nome: string;
   login: string;
   perfil?: string;
+  ativo?: boolean;
+  criadoEm?: string;
+  atualizadoEm?: string;
   sessaoToken?: string;
 };
 
@@ -128,8 +131,8 @@ export default function Home() {
     return usuarioSalvo ? JSON.parse(usuarioSalvo) : null;
   });
   const [loginForm, setLoginForm] = useState({ login: "", senha: "" });
-  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", login: "", senha: "" });
-  const [mostrarCadastroUsuario, setMostrarCadastroUsuario] = useState(false);
+  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", login: "", senha: "", perfil: "OPERADOR" });
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [alunoForm, setAlunoForm] = useState({
     nome: "",
     nomeResponsavel: "",
@@ -200,6 +203,7 @@ export default function Home() {
     listarTodos();
     listarEscolas();
     listarCobrancas();
+    listarUsuarios();
     carregarManutencao();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuarioLogado]);
@@ -306,9 +310,9 @@ export default function Home() {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/usuarios`, {
+    const response = await authFetch(`${apiUrl}/usuarios`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...usuarioHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(novoUsuarioForm)
     });
     if (!response.ok) {
@@ -316,10 +320,16 @@ export default function Home() {
       return;
     }
 
-    alert("Usuario criado. Use o login e senha para entrar.");
-    setLoginForm({ login: novoUsuarioForm.login, senha: "" });
-    setNovoUsuarioForm({ nome: "", login: "", senha: "" });
-    setMostrarCadastroUsuario(false);
+    alert("Usuario criado. Ele ja pode entrar pela tela inicial.");
+    setNovoUsuarioForm({ nome: "", login: "", senha: "", perfil: "OPERADOR" });
+    listarUsuarios();
+  }
+
+  async function listarUsuarios() {
+    const response = await authFetch(`${apiUrl}/usuarios`);
+    if (!response.ok) return;
+    const data = await response.json();
+    setUsuarios(data);
   }
 
   function sair() {
@@ -1329,6 +1339,74 @@ export default function Home() {
     );
   }
 
+  function controleUsuarios() {
+    return (
+      <section className="space-y-6">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Acesso interno</p>
+              <h2 className="mt-3 text-4xl font-semibold text-slate-950">Usuarios</h2>
+              <p className="mt-2 text-sm text-slate-600">Cadastre quem pode entrar no sistema pela tela inicial.</p>
+            </div>
+            <button type="button" onClick={() => setView("menu")} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
+          </div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-xl font-semibold text-slate-950">Novo usuario</h3>
+            <div className="mt-5 grid gap-4">
+              <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="text" placeholder="Login" value={novoUsuarioForm.login} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="password" placeholder="Senha provisoria" value={novoUsuarioForm.senha} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, senha: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <select value={novoUsuarioForm.perfil} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, perfil: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="OPERADOR">Operador</option>
+                <option value="ADMIN">Administrador</option>
+              </select>
+              <button type="button" onClick={criarUsuario} className="rounded-3xl bg-sky-600 px-6 py-4 text-sm font-semibold text-white transition hover:bg-sky-700">Cadastrar usuario</button>
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-xl font-semibold text-slate-950">Usuarios cadastrados</h3>
+              <button type="button" onClick={listarUsuarios} className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Atualizar</button>
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-5 py-4 font-medium">Nome</th>
+                    <th className="px-5 py-4 font-medium">Login</th>
+                    <th className="px-5 py-4 font-medium">Perfil</th>
+                    <th className="px-5 py-4 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usuarios.map((usuario) => (
+                    <tr key={usuario.id} className="border-t border-slate-200">
+                      <td className="px-5 py-4 font-semibold text-slate-950">{usuario.nome}</td>
+                      <td className="px-5 py-4">{usuario.login}</td>
+                      <td className="px-5 py-4">{usuario.perfil || "OPERADOR"}</td>
+                      <td className="px-5 py-4">{usuario.ativo === false ? "Inativo" : "Ativo"}</td>
+                    </tr>
+                  ))}
+                  {usuarios.length === 0 && (
+                    <tr>
+                      <td className="px-5 py-6 text-slate-500" colSpan={4}>Nenhum usuario carregado.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function menuInicial() {
     return (
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
@@ -1364,6 +1442,14 @@ export default function Home() {
               <span className="mt-3 block text-2xl font-semibold">Manutencao</span>
             </button>
             <p className="mt-4 rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm font-semibold text-slate-700">Backups, restauracao e tamanho do banco</p>
+          </div>
+
+          <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-5">
+            <button type="button" onClick={() => { setView("usuarios"); listarUsuarios(); }} className="w-full rounded-3xl bg-cyan-700 p-6 text-left text-white transition hover:bg-cyan-800">
+              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-100">Acesso</span>
+              <span className="mt-3 block text-2xl font-semibold">Usuarios</span>
+            </button>
+            <p className="mt-4 rounded-3xl border border-cyan-200 bg-white px-5 py-4 text-sm font-semibold text-cyan-800">Cadastro de logins da equipe</p>
           </div>
         </div>
       </section>
@@ -2178,20 +2264,9 @@ export default function Home() {
             <button type="button" onClick={entrar} className="rounded-3xl bg-slate-950 px-6 py-4 text-sm font-semibold text-white transition hover:bg-slate-800">Entrar</button>
           </div>
 
-          <div className="mt-6 border-t border-slate-200 pt-6">
-            <button type="button" onClick={() => setMostrarCadastroUsuario(!mostrarCadastroUsuario)} className="text-sm font-semibold text-sky-700">
-              {mostrarCadastroUsuario ? "Ocultar cadastro de usuario" : "Criar usuario"}
-            </button>
-
-            {mostrarCadastroUsuario && (
-              <div className="mt-4 grid gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-                <input type="text" placeholder="Login" value={novoUsuarioForm.login} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-                <input type="password" placeholder="Senha" value={novoUsuarioForm.senha} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, senha: e.target.value })} className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-                <button type="button" onClick={criarUsuario} className="rounded-3xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">Salvar usuario</button>
-              </div>
-            )}
-          </div>
+          <p className="mt-6 border-t border-slate-200 pt-6 text-sm text-slate-500">
+            Novos usuarios sao cadastrados dentro do sistema por um usuario ja logado.
+          </p>
         </div>
       </div>
     );

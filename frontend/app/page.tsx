@@ -1703,12 +1703,10 @@ export default function Home() {
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Em aberto</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
-            <p className="mt-2 text-sm font-semibold text-sky-800">{moeda(financeiroResumo.valorEmAberto)}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
             <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
-            <p className="mt-2 text-sm font-semibold text-emerald-800">{moeda(financeiroResumo.valorPago)}</p>
           </div>
           <div className="rounded-2xl border border-rose-200 bg-rose-50 p-7">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-rose-700">Inadimplentes</p>

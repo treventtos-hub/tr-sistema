@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
-type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "cobrancas" | "usuarios" | "manutencao";
+type ViewMode = "menu" | "aluno" | "alunos" | "escola" | "escolas" | "cobrancas" | "tarefas" | "usuarios" | "manutencao";
 
 type Aluno = {
   id: number;
@@ -204,6 +204,15 @@ export default function Home() {
   const [departamentoAtivo, setDepartamentoAtivo] = useState("Administração");
   const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
   const [comentarioDemanda, setComentarioDemanda] = useState("");
+  const [demandaForm, setDemandaForm] = useState({
+    titulo: "",
+    aluno: "",
+    departamento: "Financeiro",
+    responsavel: "",
+    prazo: "",
+    prioridade: "media",
+    comentario: ""
+  });
   const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([
     {
       id: 1,
@@ -346,6 +355,7 @@ export default function Home() {
     { id: "alunos" as ViewMode, label: "Alunos", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
     { id: "escolas" as ViewMode, label: "Turmas/Eventos", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
     { id: "cobrancas" as ViewMode, label: "Cobrancas", action: () => { setView("cobrancas"); listarTodos(); listarCobrancas(); } },
+    { id: "tarefas" as ViewMode, label: "Tarefas", action: () => setView("tarefas") },
     { id: "manutencao" as ViewMode, label: "Manutencao", action: () => { setView("manutencao"); carregarManutencao(); } },
     { id: "usuarios" as ViewMode, label: "Usuarios", action: () => { setView("usuarios"); listarUsuarios(); } }
   ];
@@ -356,6 +366,7 @@ export default function Home() {
     escola: { label: "Cadastro de escola", helper: "Dados da escola, turma/evento, senhas e valores." },
     escolas: { label: "Turmas/Eventos", helper: "Consulta de escolas, turmas, alunos vinculados e comissao." },
     cobrancas: { label: "Cobrancas", helper: "Controle de retorno, status, observacoes e lembretes." },
+    tarefas: { label: "Tarefas", helper: "Rotinas internas por departamento, prioridade e prazo." },
     manutencao: { label: "Manutencao", helper: "Backups, restauracao e tamanho das tabelas no Supabase." },
     usuarios: { label: "Usuarios", helper: "Cadastro de logins da equipe." }
   };
@@ -477,6 +488,37 @@ export default function Home() {
       )
     );
     setComentarioDemanda("");
+  }
+
+  function salvarDemanda() {
+    if (!demandaForm.titulo.trim()) {
+      alert("Informe a descricao da tarefa.");
+      return;
+    }
+
+    const novaDemanda: Demanda = {
+      id: Date.now(),
+      titulo: demandaForm.titulo.trim(),
+      aluno: demandaForm.aluno || undefined,
+      departamento: demandaForm.departamento,
+      responsavel: demandaForm.responsavel.trim() || usuarioLogado?.nome || "Equipe",
+      prazo: demandaForm.prazo,
+      comentarios: demandaForm.comentario.trim() ? [demandaForm.comentario.trim()] : [],
+      anexos: [],
+      prioridade: demandaForm.prioridade,
+      status: "aberta"
+    };
+
+    setDemandasInternas((demandas) => [novaDemanda, ...demandas]);
+    setDemandaForm({
+      titulo: "",
+      aluno: "",
+      departamento: "Financeiro",
+      responsavel: "",
+      prazo: "",
+      prioridade: "media",
+      comentario: ""
+    });
   }
 
   function resetAlunoForm() {
@@ -1561,6 +1603,89 @@ export default function Home() {
     );
   }
 
+  function tarefasView() {
+    const prioridadeClasse: Record<string, string> = {
+      baixa: "bg-slate-100 text-slate-700",
+      media: "bg-sky-100 text-sky-800",
+      alta: "bg-amber-100 text-amber-800",
+      urgente: "bg-rose-100 text-rose-800"
+    };
+
+    return (
+      <section className="grid gap-6 xl:grid-cols-[475px_minmax(0,1fr)]">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-950">Criar tarefa</h2>
+          <div className="mt-6 space-y-4">
+            <input type="text" placeholder="Descricao da tarefa" value={demandaForm.titulo} onChange={(e) => setDemandaForm({ ...demandaForm, titulo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <select value={demandaForm.aluno} onChange={(e) => setDemandaForm({ ...demandaForm, aluno: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="">Aluno vinculado</option>
+              {alunos.map((aluno) => (
+                <option key={aluno.id} value={aluno.nome}>{aluno.nome}</option>
+              ))}
+            </select>
+            <select value={demandaForm.departamento} onChange={(e) => setDemandaForm({ ...demandaForm, departamento: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option>Financeiro</option>
+              <option>Atendimento</option>
+              <option>Contratos</option>
+              <option>Eventos</option>
+              <option>Distratos</option>
+              <option>Administração</option>
+            </select>
+            <input type="text" placeholder="Responsavel" value={demandaForm.responsavel} onChange={(e) => setDemandaForm({ ...demandaForm, responsavel: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="date" value={demandaForm.prazo} onChange={(e) => setDemandaForm({ ...demandaForm, prazo: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <select value={demandaForm.prioridade} onChange={(e) => setDemandaForm({ ...demandaForm, prioridade: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option value="baixa">baixa</option>
+              <option value="media">media</option>
+              <option value="alta">alta</option>
+              <option value="urgente">urgente</option>
+            </select>
+            <textarea placeholder="Comentario inicial" value={demandaForm.comentario} onChange={(e) => setDemandaForm({ ...demandaForm, comentario: e.target.value })} className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-xl text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <button type="button" onClick={salvarDemanda} className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-lg font-semibold text-white transition hover:bg-slate-800">Salvar tarefa</button>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-950">Fila por departamento</h2>
+          <div className="mt-6 flex flex-wrap gap-3">
+            {["todos", "Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administração"].map((departamento, index) => (
+              <button key={departamento} type="button" onClick={() => setDepartamentoAtivo(departamento === "todos" ? "Administração" : departamento)} className={`rounded-xl border px-5 py-3 text-xl transition ${index === 0 || departamento === departamentoAtivo ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-[#08265f] hover:bg-slate-50"}`}>
+                {departamento}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-5 space-y-4">
+            {demandasInternas.map((demanda) => (
+              <div key={demanda.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-slate-950">{demanda.titulo}</h3>
+                    <p className="mt-2 text-lg text-[#08265f]">{demanda.aluno || "Aluno"} - {demanda.departamento}</p>
+                    <div className="mt-5 space-y-2 text-lg text-[#08265f]">
+                      <p>Responsavel: {demanda.responsavel}</p>
+                      <p>Prazo: {formatarData(demanda.prazo)}</p>
+                      <p>Comentarios: {demanda.comentarios.join(" | ") || "-"}</p>
+                      <p>Anexos: {demanda.anexos.join(" | ") || "-"}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`rounded-xl px-4 py-3 text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
+                    <select value={demanda.status} onChange={(e) => atualizarStatusDemanda(demanda.id, e.target.value)} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-xl text-slate-950">
+                      <option value="aberta">aberta</option>
+                      <option value="em andamento">em andamento</option>
+                      <option value="aguardando">aguardando</option>
+                      <option value="concluida">concluida</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function menuInicial() {
     const inadimplentes = alunos.filter(alunoEstaInadimplente).length;
     const prioridadeClasse: Record<string, string> = {
@@ -2554,6 +2679,7 @@ export default function Home() {
             {view === "escola" && cadastroEscola()}
             {view === "escolas" && consultaEscolas()}
             {view === "cobrancas" && controleCobrancas()}
+            {view === "tarefas" && tarefasView()}
             {view === "usuarios" && controleUsuarios()}
             {view === "manutencao" && manutencaoSistema()}
           </div>

@@ -261,6 +261,25 @@ export default function Home() {
   const cobrancasFiltradas = useMemo(() => {
     return cobrancas.filter((cobranca) => !cobrancaFiltroStatus || cobranca.status === cobrancaFiltroStatus);
   }, [cobrancas, cobrancaFiltroStatus]);
+  const navItems = [
+    { id: "menu" as ViewMode, label: "Painel inicial", action: () => setView("menu") },
+    { id: "alunos" as ViewMode, label: "Alunos", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
+    { id: "escolas" as ViewMode, label: "Turmas/Eventos", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
+    { id: "cobrancas" as ViewMode, label: "Cobrancas", action: () => { setView("cobrancas"); listarTodos(); listarCobrancas(); } },
+    { id: "manutencao" as ViewMode, label: "Manutencao", action: () => { setView("manutencao"); carregarManutencao(); } },
+    { id: "usuarios" as ViewMode, label: "Usuarios", action: () => { setView("usuarios"); listarUsuarios(); } }
+  ];
+  const titulosView: Record<ViewMode, { label: string; helper: string }> = {
+    menu: { label: "Painel inicial", helper: "Resumo geral do sistema interno." },
+    aluno: { label: "Cadastro de aluno", helper: "Dados do aluno, responsavel, contrato, servicos e parcelas." },
+    alunos: { label: "Alunos", helper: "Consulta, edicao, pagamentos e recibos." },
+    escola: { label: "Cadastro de escola", helper: "Dados da escola, turma/evento, senhas e valores." },
+    escolas: { label: "Turmas/Eventos", helper: "Consulta de escolas, turmas, alunos vinculados e comissao." },
+    cobrancas: { label: "Cobrancas", helper: "Controle de retorno, status, observacoes e lembretes." },
+    manutencao: { label: "Manutencao", helper: "Backups, restauracao e tamanho das tabelas no Supabase." },
+    usuarios: { label: "Usuarios", helper: "Cadastro de logins da equipe." }
+  };
+  const currentNav = titulosView[view];
 
   function moeda(valor?: number | string) {
     const numero = Number(valor || 0);
@@ -2254,12 +2273,12 @@ export default function Home() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 text-slate-950">
         <div className="w-full max-w-xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60 sm:p-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">Painel TR</p>
-          <h1 className="mt-3 text-3xl font-semibold text-slate-950">Entrar no sistema</h1>
+          <p className="text-sm font-semibold uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-black">Sistema interno</h1>
           <p className="mt-2 text-slate-600">Use o login e senha cadastrados para acessar o CRM.</p>
 
           <div className="mt-6 grid gap-4">
-            <input type="text" placeholder="Login" value={loginForm.login} onChange={(e) => setLoginForm({ ...loginForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+            <input type="text" placeholder="Login ou e-mail" value={loginForm.login} onChange={(e) => setLoginForm({ ...loginForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <input type="password" placeholder="Senha" value={loginForm.senha} onChange={(e) => setLoginForm({ ...loginForm, senha: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") entrar(); }} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
             <button type="button" onClick={entrar} className="rounded-3xl bg-slate-950 px-6 py-4 text-sm font-semibold text-white transition hover:bg-slate-800">Entrar</button>
           </div>
@@ -2273,47 +2292,79 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 sm:px-6 lg:px-10">
-      <main className="mx-auto max-w-7xl space-y-4">
-        <header className="rounded-[2rem] border border-slate-200 bg-white/90 p-6 shadow-xl shadow-slate-200/50 sm:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-3">
-              <p className="text-sm uppercase tracking-[0.3em] text-sky-600">Painel TR</p>
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">CRM de Alunos</h1>
-              <p className="max-w-2xl text-slate-600">Cadastro de alunos, escolas e controle de pagamentos.</p>
-              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                <span>Usuario: <strong className="text-slate-950">{usuarioLogado.nome}</strong></span>
-                <button type="button" onClick={sair} className="font-semibold text-rose-700">Sair</button>
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Alunos</p>
-                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.totalAlunos}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Escolas</p>
-                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Cobrancas</p>
-                <p className="mt-3 text-3xl font-semibold text-slate-950">{indicadores.cobrancasPendentes}</p>
-              </div>
-            </div>
+    <div className="min-h-screen bg-white text-slate-950 lg:bg-slate-100">
+      <main className="grid min-h-screen lg:grid-cols-[335px_minmax(0,1fr)]">
+        <aside className="bg-white px-7 py-7 text-[#08265f] lg:min-h-screen">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.34em] text-sky-700">TR EVENTOS</p>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-black">Sistema interno</h1>
           </div>
-        </header>
 
-        {buscaAlunosInicio()}
-        {painelFinanceiroAluno()}
+          <nav className="mt-12 space-y-5">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={item.action}
+                className={`w-full rounded-[14px] px-5 py-4 text-left text-xl leading-none transition ${view === item.id ? "bg-[#02071a] text-white" : "text-[#08265f] hover:bg-slate-100"}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
 
-        {view === "menu" && menuInicial()}
-        {view === "aluno" && cadastroAluno()}
-        {view === "alunos" && consultaAlunos()}
-        {view === "escola" && cadastroEscola()}
-        {view === "escolas" && consultaEscolas()}
-        {view === "cobrancas" && controleCobrancas()}
-        {view === "usuarios" && controleUsuarios()}
-        {view === "manutencao" && manutencaoSistema()}
+          <div className="mt-14 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Operacao</p>
+            <div className="mt-4 grid gap-2 text-sm font-semibold text-[#08265f]">
+              <span className="rounded-lg bg-white px-3 py-2">Usuario: {usuarioLogado.nome}</span>
+              <span className="rounded-lg bg-white px-3 py-2">{indicadores.cobrancasPendentes} cobrancas pendentes</span>
+              <span className="rounded-lg bg-white px-3 py-2">{manutencaoStatus?.lembrete || "Manutencao pronta para consultar"}</span>
+            </div>
+            <button type="button" onClick={sair} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#08265f] transition hover:bg-slate-100">
+              Sair
+            </button>
+          </div>
+        </aside>
+
+        <section className="min-w-0 bg-slate-100 p-4 sm:p-6">
+          <header className="border-b border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">Administracao</p>
+                <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{currentNav.label}</h2>
+                <p className="mt-2 max-w-2xl text-sm text-slate-600">{currentNav.helper}</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Alunos</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{indicadores.totalAlunos}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Escolas</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
+                </div>
+                <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-700">Cobrancas</p>
+                  <p className="mt-2 text-xl font-semibold text-slate-950">{indicadores.cobrancasPendentes}</p>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="mt-4 space-y-4">
+            {buscaAlunosInicio()}
+            {painelFinanceiroAluno()}
+
+            {view === "menu" && menuInicial()}
+            {view === "aluno" && cadastroAluno()}
+            {view === "alunos" && consultaAlunos()}
+            {view === "escola" && cadastroEscola()}
+            {view === "escolas" && consultaEscolas()}
+            {view === "cobrancas" && controleCobrancas()}
+            {view === "usuarios" && controleUsuarios()}
+            {view === "manutencao" && manutencaoSistema()}
+          </div>
+        </section>
       </main>
     </div>
   );

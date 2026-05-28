@@ -2312,6 +2312,7 @@ export default function Home() {
         {view === "escola" && cadastroEscola()}
         {view === "escolas" && consultaEscolas()}
         {view === "cobrancas" && controleCobrancas()}
+        {view === "usuarios" && controleUsuarios()}
         {view === "manutencao" && manutencaoSistema()}
       </main>
     </div>

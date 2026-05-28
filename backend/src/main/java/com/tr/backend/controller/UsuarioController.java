@@ -4,7 +4,12 @@ import com.tr.backend.model.Usuario;
 import com.tr.backend.repository.UsuarioRepository;
 import com.tr.backend.service.SenhaService;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
@@ -31,14 +36,11 @@ public class UsuarioController {
     }
 
     @PostMapping
-    public Usuario criar(@RequestBody Map<String, String> dados, @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public Usuario criar(@RequestBody Map<String, String> dados) {
         String login = dados.getOrDefault("login", "").trim();
         String senha = dados.getOrDefault("senha", "");
         if (login.isBlank() || senha.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe login e senha.");
-        }
-        if (repository.count() > 0 && usuarioAutenticado(authorization) == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Faça login para criar novos usuarios.");
         }
         if (repository.existsByLoginIgnoreCase(login)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Login ja cadastrado.");
@@ -70,16 +72,5 @@ public class UsuarioController {
     private Usuario semSenha(Usuario usuario) {
         usuario.setSenhaHash(null);
         return usuario;
-    }
-
-    private Usuario usuarioAutenticado(String authorization) {
-        String token = token(authorization);
-        if (token == null) return null;
-        return repository.findBySessaoToken(token).filter(usuario -> Boolean.TRUE.equals(usuario.getAtivo())).orElse(null);
-    }
-
-    private String token(String authorization) {
-        if (authorization == null || !authorization.startsWith("Bearer ")) return null;
-        return authorization.substring("Bearer ".length()).trim();
     }
 }

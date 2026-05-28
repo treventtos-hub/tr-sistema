@@ -20,9 +20,6 @@ public class AuthInterceptor implements HandlerInterceptor {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) return true;
         if (request.getRequestURI().equals("/health")) return true;
         if (request.getRequestURI().equals("/usuarios/login")) return true;
-        if (request.getRequestURI().equals("/usuarios") && "POST".equalsIgnoreCase(request.getMethod()) && usuarioRepository.count() == 0) {
-            return true;
-        }
 
         String authorization = request.getHeader("Authorization");
         if (authorization == null || !authorization.startsWith("Bearer ")) {

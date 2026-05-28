@@ -251,6 +251,7 @@ export default function Home() {
   const [cobrancas, setCobrancas] = useState<Cobranca[]>([]);
   const [cobrancaEditando, setCobrancaEditando] = useState<Cobranca | null>(null);
   const [cobrancaFiltroStatus, setCobrancaFiltroStatus] = useState("");
+  const [statusCobrancaRascunho, setStatusCobrancaRascunho] = useState<Record<number, CobrancaStatus>>({});
   const [comentariosCobranca, setComentariosCobranca] = useState<Record<number, string>>({});
   const [cobrancaForm, setCobrancaForm] = useState({
     alunoId: "",
@@ -322,7 +323,10 @@ export default function Home() {
       .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [alunos, escolaDetalhe]);
   const cobrancasFiltradas = useMemo(() => {
-    return cobrancas.filter((cobranca) => !cobrancaFiltroStatus || cobranca.status === cobrancaFiltroStatus);
+    return cobrancas.filter((cobranca) => {
+      if (!cobrancaFiltroStatus) return cobranca.status !== "RESOLVIDO";
+      return cobranca.status === cobrancaFiltroStatus;
+    });
   }, [cobrancas, cobrancaFiltroStatus]);
   const financeiroResumo = useMemo(() => {
     const valorEmAberto = alunos.reduce((total, aluno) => {
@@ -776,6 +780,11 @@ export default function Home() {
     }
 
     listarCobrancas();
+    setStatusCobrancaRascunho((rascunhos) => {
+      const atualizados = { ...rascunhos };
+      delete atualizados[cobranca.id];
+      return atualizados;
+    });
   }
 
   async function comentarCobranca(cobranca: Cobranca) {
@@ -1368,7 +1377,7 @@ export default function Home() {
             </div>
             <div className="flex flex-wrap gap-3">
               <select value={cobrancaFiltroStatus} onChange={(e) => setCobrancaFiltroStatus(e.target.value)} className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
-                <option value="">Todos os status</option>
+                <option value="">Pendentes</option>
                 {cobrancaStatusOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -1401,11 +1410,12 @@ export default function Home() {
 
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="rounded-2xl bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-800">alta</span>
-                      <select value={cobranca.status} onChange={(e) => atualizarStatusCobranca(cobranca, e.target.value as CobrancaStatus)} className="min-w-48 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
+                      <select value={statusCobrancaRascunho[cobranca.id] || cobranca.status} onChange={(e) => setStatusCobrancaRascunho({ ...statusCobrancaRascunho, [cobranca.id]: e.target.value as CobrancaStatus })} className="min-w-48 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200">
                         {cobrancaStatusOptions.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
+                      <button type="button" onClick={() => atualizarStatusCobranca(cobranca, statusCobrancaRascunho[cobranca.id] || cobranca.status)} className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Salvar</button>
                       <button type="button" onClick={() => editarCobranca(cobranca)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Editar</button>
                     </div>
                   </div>
@@ -1421,7 +1431,6 @@ export default function Home() {
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button type="button" onClick={() => atualizarStatusCobranca(cobranca, "COBRAR_NOVAMENTE_15_DIAS")} className="rounded-2xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-violet-700">Cobrar em 15 dias</button>
-                      <button type="button" onClick={() => atualizarStatusCobranca(cobranca, "RESOLVIDO")} className="rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">Marcar resolvido</button>
                       <button type="button" onClick={() => excluirCobranca(cobranca.id)} className="rounded-2xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-700">Excluir</button>
                     </div>
                   </div>

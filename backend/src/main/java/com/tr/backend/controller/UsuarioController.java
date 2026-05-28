@@ -6,7 +6,9 @@ import com.tr.backend.service.SenhaService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,8 +53,36 @@ public class UsuarioController {
         usuario.setLogin(login);
         usuario.setSenhaHash(senhaService.gerarHash(senha));
         usuario.setPerfil(dados.getOrDefault("perfil", "OPERADOR"));
-        usuario.setAtivo(true);
+        usuario.setAtivo(Boolean.parseBoolean(dados.getOrDefault("ativo", "true")));
         usuario.setCriadoEm(LocalDateTime.now());
+        usuario.setAtualizadoEm(LocalDateTime.now());
+        return semSenha(repository.save(usuario));
+    }
+
+    @PutMapping("/{id}")
+    public Usuario atualizar(@PathVariable Long id, @RequestBody Map<String, String> dados) {
+        Usuario usuario = repository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario nao encontrado."));
+
+        String login = dados.getOrDefault("login", "").trim();
+        if (login.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o login.");
+        }
+        repository.findByLoginIgnoreCase(login)
+                .filter(usuarioExistente -> !usuarioExistente.getId().equals(id))
+                .ifPresent(usuarioExistente -> {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Login ja cadastrado.");
+                });
+
+        String senha = dados.getOrDefault("senha", "");
+        usuario.setNome(dados.getOrDefault("nome", login).trim());
+        usuario.setLogin(login);
+        usuario.setPerfil(dados.getOrDefault("perfil", "OPERADOR"));
+        usuario.setAtivo(Boolean.parseBoolean(dados.getOrDefault("ativo", "true")));
+        if (!senha.isBlank()) {
+            usuario.setSenhaHash(senhaService.gerarHash(senha));
+            usuario.setSessaoToken(null);
+        }
         usuario.setAtualizadoEm(LocalDateTime.now());
         return semSenha(repository.save(usuario));
     }

@@ -146,7 +146,8 @@ export default function Home() {
     return usuarioSalvo ? JSON.parse(usuarioSalvo) : null;
   });
   const [loginForm, setLoginForm] = useState({ login: "", senha: "" });
-  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", login: "", senha: "", perfil: "OPERADOR" });
+  const [novoUsuarioForm, setNovoUsuarioForm] = useState({ nome: "", login: "", senha: "", perfil: "OPERADOR", ativo: "true" });
+  const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [alunoForm, setAlunoForm] = useState({
     nome: "",
@@ -402,25 +403,41 @@ export default function Home() {
     window.localStorage.setItem("tr_usuario", JSON.stringify(usuario));
   }
 
-  async function criarUsuario() {
-    if (!novoUsuarioForm.login || !novoUsuarioForm.senha) {
-      alert("Informe login e senha para criar o usuario.");
+  function limparUsuarioForm() {
+    setNovoUsuarioForm({ nome: "", login: "", senha: "", perfil: "OPERADOR", ativo: "true" });
+    setUsuarioEditando(null);
+  }
+
+  async function salvarUsuario() {
+    if (!novoUsuarioForm.login || (!usuarioEditando && !novoUsuarioForm.senha)) {
+      alert(usuarioEditando ? "Informe o login do usuario." : "Informe login e senha para criar o usuario.");
       return;
     }
 
-    const response = await authFetch(`${apiUrl}/usuarios`, {
-      method: "POST",
+    const response = await authFetch(usuarioEditando ? `${apiUrl}/usuarios/${usuarioEditando.id}` : `${apiUrl}/usuarios`, {
+      method: usuarioEditando ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(novoUsuarioForm)
     });
     if (!response.ok) {
-      alert("Nao foi possivel criar o usuario.");
+      alert(usuarioEditando ? "Nao foi possivel atualizar o usuario." : "Nao foi possivel criar o usuario.");
       return;
     }
 
-    alert("Usuario criado. Ele ja pode entrar pela tela inicial.");
-    setNovoUsuarioForm({ nome: "", login: "", senha: "", perfil: "OPERADOR" });
+    alert(usuarioEditando ? "Usuario atualizado." : "Usuario criado. Ele ja pode entrar pela tela inicial.");
+    limparUsuarioForm();
     listarUsuarios();
+  }
+
+  function editarUsuario(usuario: Usuario) {
+    setUsuarioEditando(usuario);
+    setNovoUsuarioForm({
+      nome: usuario.nome || "",
+      login: usuario.login || "",
+      senha: "",
+      perfil: usuario.perfil || "OPERADOR",
+      ativo: usuario.ativo === false ? "false" : "true"
+    });
   }
 
   async function listarUsuarios() {
@@ -1479,16 +1496,25 @@ export default function Home() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-xl font-semibold text-slate-950">Novo usuario</h3>
+            <h3 className="text-xl font-semibold text-slate-950">{usuarioEditando ? "Editar usuario" : "Novo usuario"}</h3>
             <div className="mt-5 grid gap-4">
               <input type="text" placeholder="Nome" value={novoUsuarioForm.nome} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, nome: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <input type="text" placeholder="Login" value={novoUsuarioForm.login} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, login: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
-              <input type="password" placeholder="Senha provisoria" value={novoUsuarioForm.senha} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, senha: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+              <input type="password" placeholder={usuarioEditando ? "Nova senha (deixe em branco para manter)" : "Senha provisoria"} value={novoUsuarioForm.senha} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, senha: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
               <select value={novoUsuarioForm.perfil} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, perfil: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
                 <option value="OPERADOR">Operador</option>
                 <option value="ADMIN">Administrador</option>
               </select>
-              <button type="button" onClick={criarUsuario} className="rounded-3xl bg-sky-600 px-6 py-4 text-sm font-semibold text-white transition hover:bg-sky-700">Cadastrar usuario</button>
+              <select value={novoUsuarioForm.ativo} onChange={(e) => setNovoUsuarioForm({ ...novoUsuarioForm, ativo: e.target.value })} className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                <option value="true">Ativo</option>
+                <option value="false">Inativo</option>
+              </select>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={salvarUsuario} className="rounded-3xl bg-sky-600 px-6 py-4 text-sm font-semibold text-white transition hover:bg-sky-700">{usuarioEditando ? "Atualizar usuario" : "Cadastrar usuario"}</button>
+                {usuarioEditando && (
+                  <button type="button" onClick={limparUsuarioForm} className="rounded-3xl border border-slate-200 bg-white px-6 py-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancelar edicao</button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1506,6 +1532,7 @@ export default function Home() {
                     <th className="px-5 py-4 font-medium">Login</th>
                     <th className="px-5 py-4 font-medium">Perfil</th>
                     <th className="px-5 py-4 font-medium">Status</th>
+                    <th className="px-5 py-4 font-medium">Acoes</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1515,11 +1542,14 @@ export default function Home() {
                       <td className="px-5 py-4">{usuario.login}</td>
                       <td className="px-5 py-4">{usuario.perfil || "OPERADOR"}</td>
                       <td className="px-5 py-4">{usuario.ativo === false ? "Inativo" : "Ativo"}</td>
+                      <td className="px-5 py-4">
+                        <button type="button" onClick={() => editarUsuario(usuario)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Editar</button>
+                      </td>
                     </tr>
                   ))}
                   {usuarios.length === 0 && (
                     <tr>
-                      <td className="px-5 py-6 text-slate-500" colSpan={4}>Nenhum usuario carregado.</td>
+                      <td className="px-5 py-6 text-slate-500" colSpan={5}>Nenhum usuario carregado.</td>
                     </tr>
                   )}
                 </tbody>

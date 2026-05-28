@@ -13,6 +13,8 @@ type Aluno = {
   telefone?: string;
   escola?: string;
   turma?: string;
+  formaPagamento?: string;
+  status?: string;
   valorContrato?: number;
   valorRestanteContrato?: number;
   valorMensal?: number;
@@ -93,6 +95,19 @@ type Usuario = {
   criadoEm?: string;
   atualizadoEm?: string;
   sessaoToken?: string;
+};
+
+type Demanda = {
+  id: number;
+  titulo: string;
+  aluno?: string;
+  departamento: string;
+  responsavel: string;
+  prazo: string;
+  comentarios: string[];
+  anexos: string[];
+  prioridade: string;
+  status: string;
 };
 
 type TabelaManutencao = {
@@ -185,6 +200,44 @@ export default function Home() {
   const [alunoEditando, setAlunoEditando] = useState<Aluno | null>(null);
   const [escolaEditando, setEscolaEditando] = useState<Escola | null>(null);
   const [mostrarAlunosEscola, setMostrarAlunosEscola] = useState(false);
+  const [departamentoAtivo, setDepartamentoAtivo] = useState("Administração");
+  const [demandaSelecionadaId, setDemandaSelecionadaId] = useState<number | null>(null);
+  const [comentarioDemanda, setComentarioDemanda] = useState("");
+  const [demandasInternas, setDemandasInternas] = useState<Demanda[]>([
+    {
+      id: 1,
+      titulo: "Aluno pediu segunda via do contrato",
+      departamento: "Contratos",
+      responsavel: "Carla Admin",
+      prazo: "2026-05-22",
+      comentarios: ["Gerar segunda via e enviar por e-mail."],
+      anexos: [],
+      prioridade: "media",
+      status: "aberta"
+    },
+    {
+      id: 2,
+      titulo: "Aluno enviou comprovante",
+      departamento: "Financeiro",
+      responsavel: "Ana Financeiro",
+      prazo: "2026-05-20",
+      comentarios: ["Conferir valor parcial recebido."],
+      anexos: ["entrada-rafael.jpg"],
+      prioridade: "alta",
+      status: "em andamento"
+    },
+    {
+      id: 3,
+      titulo: "Aluno pediu cancelamento",
+      departamento: "Distratos",
+      responsavel: "Bruno Atendimento",
+      prazo: "2026-05-24",
+      comentarios: ["Validar contrato antes de iniciar distrato."],
+      anexos: [],
+      prioridade: "urgente",
+      status: "aberta"
+    }
+  ]);
   const [cobrancas, setCobrancas] = useState<Cobranca[]>([]);
   const [cobrancaEditando, setCobrancaEditando] = useState<Cobranca | null>(null);
   const [cobrancaFiltroStatus, setCobrancaFiltroStatus] = useState("");
@@ -261,6 +314,32 @@ export default function Home() {
   const cobrancasFiltradas = useMemo(() => {
     return cobrancas.filter((cobranca) => !cobrancaFiltroStatus || cobranca.status === cobrancaFiltroStatus);
   }, [cobrancas, cobrancaFiltroStatus]);
+  const financeiroResumo = useMemo(() => {
+    const valorEmAberto = alunos.reduce((total, aluno) => {
+      const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
+      return restante > 0 ? total + restante : total;
+    }, 0);
+    const valorPago = alunos.reduce((total, aluno) => {
+      const contrato = Number(aluno.valorContrato || 0);
+      const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
+      return contrato > 0 && restante <= 0 ? total + contrato : total;
+    }, 0);
+    const emAberto = alunos.filter((aluno) => Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) > 0).length;
+    const pagos = alunos.filter((aluno) => Number(aluno.valorContrato || 0) > 0 && Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0) <= 0).length;
+
+    return {
+      valorEmAberto,
+      valorPago,
+      emAberto,
+      pagos
+    };
+  }, [alunos]);
+  const demandasComAluno = useMemo(() => {
+    return demandasInternas.map((demanda, index) => ({
+      ...demanda,
+      aluno: demanda.aluno || alunos[index]?.nome || alunos[0]?.nome || "Aluno"
+    }));
+  }, [alunos, demandasInternas]);
   const navItems = [
     { id: "menu" as ViewMode, label: "Painel inicial", action: () => setView("menu") },
     { id: "alunos" as ViewMode, label: "Alunos", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
@@ -355,6 +434,32 @@ export default function Home() {
     window.localStorage.removeItem("tr_usuario");
     setUsuarioLogado(null);
     setView("menu");
+  }
+
+  function alunoEstaInadimplente(aluno: Aluno) {
+    const status = (aluno.status || "").toLowerCase();
+    const restante = Number(aluno.valorRestanteContrato ?? aluno.valorContrato ?? 0);
+    return status === "inadimplente" || restante > 0;
+  }
+
+  function atualizarStatusDemanda(id: number, status: string) {
+    setDemandasInternas((demandas) =>
+      demandas.map((demanda) => (demanda.id === id ? { ...demanda, status } : demanda))
+    );
+  }
+
+  function adicionarComentarioDemanda() {
+    const comentario = comentarioDemanda.trim();
+    if (!demandaSelecionadaId || !comentario) return;
+
+    setDemandasInternas((demandas) =>
+      demandas.map((demanda) =>
+        demanda.id === demandaSelecionadaId
+          ? { ...demanda, comentarios: [...demanda.comentarios, comentario] }
+          : demanda
+      )
+    );
+    setComentarioDemanda("");
   }
 
   function resetAlunoForm() {
@@ -1427,48 +1532,98 @@ export default function Home() {
   }
 
   function menuInicial() {
+    const inadimplentes = alunos.filter(alunoEstaInadimplente).length;
+    const prioridadeClasse: Record<string, string> = {
+      baixa: "bg-slate-100 text-slate-700",
+      media: "bg-sky-100 text-sky-800",
+      alta: "bg-amber-100 text-amber-800",
+      urgente: "bg-rose-100 text-rose-800"
+    };
+    const departamentosResumo = ["Financeiro", "Atendimento", "Contratos", "Eventos", "Distratos", "Administração"];
+
     return (
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <h2 className="text-2xl font-semibold text-slate-950">Escolha o cadastro</h2>
-        <div className="mt-6 grid gap-4">
-          <div className="rounded-3xl border border-sky-200 bg-sky-50 p-5">
-            <button type="button" onClick={() => { setView("aluno"); listarEscolas(); }} className="w-full rounded-3xl bg-sky-600 p-6 text-left text-white transition hover:bg-sky-700">
-              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-100">Cadastro</span>
-              <span className="mt-3 block text-2xl font-semibold">Aluno</span>
-            </button>
-            <button type="button" onClick={() => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); listarTodos(); listarEscolas(); }} className="mt-4 w-full rounded-3xl border border-sky-200 bg-white px-5 py-4 text-left text-sm font-semibold text-sky-700 transition hover:bg-sky-100">Alunos cadastrados</button>
+      <section className="space-y-7">
+        <div className="grid gap-5 xl:grid-cols-4">
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-7">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Em aberto</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.emAberto}</p>
+            <p className="mt-2 text-sm font-semibold text-sky-800">{moeda(financeiroResumo.valorEmAberto)}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-7">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Pagos</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{financeiroResumo.pagos}</p>
+            <p className="mt-2 text-sm font-semibold text-emerald-800">{moeda(financeiroResumo.valorPago)}</p>
+          </div>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-7">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-rose-700">Inadimplentes</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{inadimplentes}</p>
+          </div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-7">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">Turmas/Eventos</p>
+            <p className="mt-5 text-3xl font-semibold text-slate-950">{indicadores.totalEscolas}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
+          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
+            <h2 className="text-2xl font-semibold text-slate-950">Demandas recentes</h2>
+            <div className="mt-6 space-y-4">
+              {demandasComAluno.slice(0, 3).map((demanda) => (
+                <div
+                  key={demanda.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setDemandaSelecionadaId(demanda.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter") setDemandaSelecionadaId(demanda.id); }}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-sky-200 hover:bg-white"
+                >
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-xl font-semibold text-slate-950">{demanda.titulo}</p>
+                      <p className="mt-2 text-base text-[#08265f]">{demanda.aluno} - {demanda.departamento}</p>
+                    </div>
+                    <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                      <span className={`rounded-xl px-4 py-3 text-center text-sm font-semibold ${prioridadeClasse[demanda.prioridade]}`}>{demanda.prioridade}</span>
+                      <select value={demanda.status} onClick={(e) => e.stopPropagation()} onChange={(e) => atualizarStatusDemanda(demanda.id, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-5 py-3 text-base text-slate-950 sm:w-44">
+                        <option value="aberta">aberta</option>
+                        <option value="em andamento">em andamento</option>
+                        <option value="aguardando">aguardando</option>
+                        <option value="concluida">concluida</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {demandaSelecionadaId === demanda.id && (
+                    <div className="mt-4 border-t border-slate-200 pt-4" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-sm font-semibold text-slate-700">Comentarios</p>
+                      <div className="mt-2 space-y-2 text-sm text-[#08265f]">
+                        {demanda.comentarios.map((comentario, index) => (
+                          <p key={`${demanda.id}-${index}`} className="rounded-xl bg-white px-4 py-3">{comentario}</p>
+                        ))}
+                      </div>
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                        <textarea value={comentarioDemanda} onChange={(e) => setComentarioDemanda(e.target.value)} placeholder="Adicionar comentario" className="min-h-24 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200" />
+                        <button type="button" onClick={adicionarComentarioDemanda} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">Comentar</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
-            <button type="button" onClick={() => { setView("escola"); listarEscolas(); }} className="w-full rounded-3xl bg-emerald-600 p-6 text-left text-white transition hover:bg-emerald-700">
-              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-100">Cadastro</span>
-              <span className="mt-3 block text-2xl font-semibold">Escola</span>
-            </button>
-            <button type="button" onClick={() => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); }} className="mt-4 w-full rounded-3xl border border-emerald-200 bg-white px-5 py-4 text-left text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100">Escolas cadastradas</button>
-          </div>
-
-          <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
-            <button type="button" onClick={() => { setView("cobrancas"); listarTodos(); listarCobrancas(); }} className="w-full rounded-3xl bg-violet-600 p-6 text-left text-white transition hover:bg-violet-700">
-              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-100">Financeiro</span>
-              <span className="mt-3 block text-2xl font-semibold">Cobrancas</span>
-            </button>
-            <p className="mt-4 rounded-3xl border border-violet-200 bg-white px-5 py-4 text-sm font-semibold text-violet-700">{indicadores.cobrancasPendentes} cobrancas pendentes</p>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <button type="button" onClick={() => { setView("manutencao"); carregarManutencao(); }} className="w-full rounded-3xl bg-slate-950 p-6 text-left text-white transition hover:bg-slate-800">
-              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Sistema</span>
-              <span className="mt-3 block text-2xl font-semibold">Manutencao</span>
-            </button>
-            <p className="mt-4 rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm font-semibold text-slate-700">Backups, restauracao e tamanho do banco</p>
-          </div>
-
-          <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-5">
-            <button type="button" onClick={() => { setView("usuarios"); listarUsuarios(); }} className="w-full rounded-3xl bg-cyan-700 p-6 text-left text-white transition hover:bg-cyan-800">
-              <span className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-100">Acesso</span>
-              <span className="mt-3 block text-2xl font-semibold">Usuarios</span>
-            </button>
-            <p className="mt-4 rounded-3xl border border-cyan-200 bg-white px-5 py-4 text-sm font-semibold text-cyan-800">Cadastro de logins da equipe</p>
+          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
+            <h2 className="text-2xl font-semibold text-slate-950">Mapa de departamentos</h2>
+            <div className="mt-6 space-y-4">
+              {departamentosResumo.map((departamento) => (
+                <div key={departamento} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-xl font-semibold text-slate-950">{departamento}</p>
+                  <span className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#08265f]">
+                    {demandasInternas.filter((demanda) => demanda.departamento === departamento && demanda.status !== "concluida").length} abertas
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -2314,11 +2469,19 @@ export default function Home() {
           </nav>
 
           <div className="mt-14 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Operacao</p>
-            <div className="mt-4 grid gap-2 text-sm font-semibold text-[#08265f]">
-              <span className="rounded-lg bg-white px-3 py-2">Usuario: {usuarioLogado.nome}</span>
-              <span className="rounded-lg bg-white px-3 py-2">{indicadores.cobrancasPendentes} cobrancas pendentes</span>
-              <span className="rounded-lg bg-white px-3 py-2">{manutencaoStatus?.lembrete || "Manutencao pronta para consultar"}</span>
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Departamento ativo</p>
+            <select value={departamentoAtivo} onChange={(e) => setDepartamentoAtivo(e.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-lg text-slate-950 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+              <option>Administração</option>
+              <option>Financeiro</option>
+              <option>Atendimento</option>
+              <option>Contratos</option>
+              <option>Eventos</option>
+            </select>
+            <div className="mt-4 flex flex-wrap gap-2 text-sm font-semibold text-[#08265f]">
+              <span className="rounded-lg bg-white px-3 py-2">Usuarios</span>
+              <span className="rounded-lg bg-white px-3 py-2">Permissoes</span>
+              <span className="rounded-lg bg-white px-3 py-2">Departamentos</span>
+              <span className="rounded-lg bg-white px-3 py-2">Configuracoes</span>
             </div>
             <button type="button" onClick={sair} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#08265f] transition hover:bg-slate-100">
               Sair
@@ -2352,8 +2515,8 @@ export default function Home() {
           </header>
 
           <div className="mt-4 space-y-4">
-            {buscaAlunosInicio()}
-            {painelFinanceiroAluno()}
+            {view === "alunos" && buscaAlunosInicio()}
+            {view !== "menu" && painelFinanceiroAluno()}
 
             {view === "menu" && menuInicial()}
             {view === "aluno" && cadastroAluno()}

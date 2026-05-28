@@ -353,7 +353,8 @@ export default function Home() {
   const navItems = [
     { id: "menu" as ViewMode, label: "Painel inicial", action: () => setView("menu") },
     { id: "alunos" as ViewMode, label: "Alunos", action: () => { setView("alunos"); setAlunoDetalhe(null); setAlunoEscolaFiltro(""); setResultadoBuscaVisivel(false); listarTodos(); listarEscolas(); } },
-    { id: "escolas" as ViewMode, label: "Turmas/Eventos", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
+    { id: "escola" as ViewMode, label: "Cadastro de escola", action: () => { resetEscolaForm(); setView("escola"); listarEscolas(); } },
+    { id: "escolas" as ViewMode, label: "Escolas cadastradas", action: () => { setView("escolas"); setEscolaDetalhe(null); listarEscolas(); } },
     { id: "cobrancas" as ViewMode, label: "Cobrancas", action: () => { setView("cobrancas"); listarTodos(); listarCobrancas(); } },
     { id: "tarefas" as ViewMode, label: "Tarefas", action: () => setView("tarefas") },
     { id: "manutencao" as ViewMode, label: "Manutencao", action: () => { setView("manutencao"); carregarManutencao(); } },
@@ -2092,7 +2093,10 @@ export default function Home() {
             <h2 className="text-2xl font-semibold text-slate-950">Escolas cadastradas</h2>
             <p className="mt-2 text-slate-600">Selecione uma escola para abrir todos os dados do cadastro.</p>
           </div>
-          <button type="button" onClick={() => { setView("menu"); setEscolaDetalhe(null); setMostrarAlunosEscola(false); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" onClick={() => { resetEscolaForm(); setView("escola"); listarEscolas(); }} className="rounded-3xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Cadastrar escola</button>
+            <button type="button" onClick={() => { setView("menu"); setEscolaDetalhe(null); setMostrarAlunosEscola(false); }} className="rounded-3xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Voltar</button>
+          </div>
         </div>
 
         {escolaDetalhe ? (
